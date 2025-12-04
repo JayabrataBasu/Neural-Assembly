@@ -9,7 +9,7 @@
 ; 0       4       n_params     (uint32_t)
 ; 4       4       padding
 ; 8       8       params       (Tensor**) - parameter tensors
-; 16      8       grads        (Tensor**) - gradient tensors
+; 16      8       param_nodes  (Node**) - parameter nodes (grads from node->grad)
 ; 24      8       step_fn      (void (*)(Optimizer*))
 ; 32      8       zero_grad_fn (void (*)(Optimizer*))
 ; 40      8       state        (void*) - optimizer-specific state
@@ -18,10 +18,13 @@
 %define OPT_SIZE            64
 %define OPT_N_PARAMS        0
 %define OPT_PARAMS          8
-%define OPT_GRADS           16
+%define OPT_PARAM_NODES     16
 %define OPT_STEP_FN         24
 %define OPT_ZERO_GRAD_FN    32
 %define OPT_STATE           40
+
+; Node offset for grad
+%define NODE_GRAD           8
 
 ; SGD State struct:
 ; Offset  Size    Field
@@ -87,7 +90,7 @@ global optimizer_free
 ; sgd_create - Create SGD optimizer
 ; Arguments:
 ;   RDI = Tensor** params (array of parameter tensors)
-;   RSI = Tensor** grads (array of gradient tensors)
+;   RSI = Node** param_nodes (array of parameter nodes - grads from node->grad)
 ;   RDX = n_params (uint32_t)
 ;   XMM0 = lr (double)
 ;   XMM1 = momentum (double)
@@ -105,7 +108,7 @@ sgd_create:
     sub rsp, 56
     
     mov r12, rdi                    ; params
-    mov r13, rsi                    ; grads
+    mov r13, rsi                    ; param_nodes
     mov r14d, edx                   ; n_params
     movsd [rsp], xmm0               ; lr
     movsd [rsp+8], xmm1             ; momentum
@@ -121,7 +124,7 @@ sgd_create:
     ; Initialize optimizer
     mov [r15 + OPT_N_PARAMS], r14d
     mov [r15 + OPT_PARAMS], r12
-    mov [r15 + OPT_GRADS], r13
+    mov [r15 + OPT_PARAM_NODES], r13
     
     lea rax, [rel sgd_step]
     mov [r15 + OPT_STEP_FN], rax
@@ -157,7 +160,7 @@ sgd_create:
     xor ecx, ecx
 .create_velocities:
     cmp ecx, r14d
-    jge .done
+    jge .done                       ; done creating velocities, jump to .done
     
     push rcx
     mov rax, [r12 + rcx*8]          ; params[i]
@@ -210,13 +213,13 @@ sgd_step:
     push r13
     push r14
     push r15
-    sub rsp, 40
+    sub rsp, 56
     
     mov r12, rdi                    ; optimizer
     
     mov r13d, [r12 + OPT_N_PARAMS]
     mov r14, [r12 + OPT_PARAMS]
-    mov r15, [r12 + OPT_GRADS]
+    mov r15, [r12 + OPT_PARAM_NODES] ; param_nodes array
     mov rbx, [r12 + OPT_STATE]
     
     movsd xmm4, [rbx]               ; lr
@@ -238,7 +241,14 @@ sgd_step:
     mov [rsp+8], ecx                ; save index
     
     mov rax, [r14 + rcx*8]          ; param tensor
-    mov rsi, [r15 + rcx*8]          ; grad tensor
+    ; Get grad from param_nodes[i]->grad (NODE_GRAD = 8)
+    mov rsi, [r15 + rcx*8]          ; param_node
+    test rsi, rsi
+    jz .next_param                  ; skip if null node
+    mov rsi, [rsi + NODE_GRAD]      ; node->grad (tensor)
+    test rsi, rsi
+    jz .next_param                  ; skip if null grad
+    mov [rsp+48], rsi               ; save grad tensor
     mov r8, [rsp]
     mov rdx, [r8 + rcx*8]           ; velocity tensor
     
@@ -257,7 +267,8 @@ sgd_step:
     pop r8
     pop rdi
     
-    mov eax, [rsi + TENSOR_DTYPE]
+    mov rax, [rsp+48]               ; reload grad tensor
+    mov eax, [rax + TENSOR_DTYPE]
     cmp eax, DT_FLOAT32
     je .momentum_f32
     
@@ -324,7 +335,14 @@ sgd_step:
     mov [rsp+8], ecx
     
     mov rax, [r14 + rcx*8]          ; param tensor
-    mov rsi, [r15 + rcx*8]          ; grad tensor
+    ; Get grad from param_nodes[i]->grad
+    mov rsi, [r15 + rcx*8]          ; param_node
+    test rsi, rsi
+    jz .simple_next                 ; skip if null node
+    mov rsi, [rsi + NODE_GRAD]      ; node->grad
+    test rsi, rsi
+    jz .simple_next                 ; skip if null grad
+    mov [rsp+48], rsi               ; save grad tensor
     
     mov rdi, [rax + TENSOR_DATA]
     mov r8, [rsi + TENSOR_DATA]
@@ -337,7 +355,7 @@ sgd_step:
     pop r8
     pop rdi
     
-    mov rax, [r14]
+    mov rax, [rsp+48]               ; reload grad tensor
     mov eax, [rax + TENSOR_DTYPE]
     cmp eax, DT_FLOAT32
     je .simple_f32
@@ -383,7 +401,7 @@ sgd_step:
     jmp .simple_loop
 
 .done:
-    add rsp, 40
+    add rsp, 56
     pop r15
     pop r14
     pop r13
@@ -407,7 +425,7 @@ sgd_zero_grad:
     
     mov r12, rdi
     mov r13d, [r12 + OPT_N_PARAMS]
-    mov rbx, [r12 + OPT_GRADS]
+    mov rbx, [r12 + OPT_PARAM_NODES]
     
     xor ecx, ecx
 .zero_loop:
@@ -415,14 +433,18 @@ sgd_zero_grad:
     jge .done
     
     push rcx
-    mov rax, [rbx + rcx*8]          ; grad tensor
+    mov rax, [rbx + rcx*8]          ; param_node
+    test rax, rax
+    jz .next
+    mov rax, [rax + NODE_GRAD]      ; node->grad tensor
     test rax, rax
     jz .next
     
+    push rax
     mov rdi, rax
     call tensor_data_size
     mov rsi, rax
-    mov rax, [rbx + rcx*8]
+    pop rax
     mov rdi, [rax + TENSOR_DATA]
     call mem_zero
     
@@ -443,7 +465,7 @@ sgd_zero_grad:
 ; adam_create - Create Adam optimizer
 ; Arguments:
 ;   RDI = Tensor** params
-;   RSI = Tensor** grads
+;   RSI = Node** param_nodes
 ;   RDX = n_params (uint32_t)
 ;   XMM0 = lr (double)
 ;   XMM1 = beta1 (double)
@@ -463,7 +485,7 @@ adam_create:
     sub rsp, 72
     
     mov r12, rdi                    ; params
-    mov r13, rsi                    ; grads
+    mov r13, rsi                    ; param_nodes
     mov r14d, edx                   ; n_params
     movsd [rsp], xmm0               ; lr
     movsd [rsp+8], xmm1             ; beta1
@@ -481,7 +503,7 @@ adam_create:
     ; Initialize optimizer
     mov [r15 + OPT_N_PARAMS], r14d
     mov [r15 + OPT_PARAMS], r12
-    mov [r15 + OPT_GRADS], r13
+    mov [r15 + OPT_PARAM_NODES], r13
     
     lea rax, [rel adam_step]
     mov [r15 + OPT_STEP_FN], rax
@@ -584,13 +606,13 @@ adam_step:
     push r13
     push r14
     push r15
-    sub rsp, 104
+    sub rsp, 112
     
     mov r12, rdi                    ; optimizer
     
     mov r13d, [r12 + OPT_N_PARAMS]
     mov r14, [r12 + OPT_PARAMS]
-    mov r15, [r12 + OPT_GRADS]
+    mov r15, [r12 + OPT_PARAM_NODES]
     mov rbx, [r12 + OPT_STATE]
     
     ; Increment time step
@@ -645,7 +667,13 @@ adam_step:
     
     mov rax, [r14 + rcx*8]          ; param tensor
     mov [rsp+80], rax
-    mov rsi, [r15 + rcx*8]          ; grad tensor
+    ; Get grad from param_nodes[i]->grad
+    mov rsi, [r15 + rcx*8]          ; param_node
+    test rsi, rsi
+    jz .adam_next                   ; skip if null node
+    mov rsi, [rsi + NODE_GRAD]      ; node->grad tensor
+    test rsi, rsi
+    jz .adam_next                   ; skip if null grad
     mov [rsp+88], rsi
     mov r8, [rsp+8]                 ; m array
     mov rdx, [r8 + rcx*8]           ; m tensor
@@ -792,7 +820,7 @@ adam_step:
     jmp .adam_loop
 
 .done:
-    add rsp, 104
+    add rsp, 112
     pop r15
     pop r14
     pop r13

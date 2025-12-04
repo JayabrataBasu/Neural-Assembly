@@ -36,6 +36,9 @@ section .data
     mode_read:          db "r", 0
     csv_delim:          db ",", 0
     newline_char:       db 10, 0
+    dbg_samples:        db "[DBG] n_samples = ", 0
+    dbg_features:       db "[DBG] n_features = ", 0
+    dbg_nl:             db 10, 0
 
 section .bss
     align 8
@@ -64,6 +67,8 @@ extern tensor_numel
 extern panic
 extern str_to_float
 extern str_to_int
+extern print_string
+extern print_int
 
 ; Export dataset functions
 global dataset_create
@@ -193,6 +198,16 @@ dataset_load_csv:
     
     mov [rsp+40], r12               ; n_samples
     
+    ; Debug: print n_samples
+    push r12
+    lea rdi, [rel dbg_samples]
+    call print_string
+    mov rdi, r12
+    call print_int
+    lea rdi, [rel dbg_nl]
+    call print_string
+    pop r12
+    
     ; Allocate dataset
     mov rdi, DATASET_SIZE
     call mem_alloc
@@ -207,6 +222,16 @@ dataset_load_csv:
     mov eax, [rsp+24]
     mov [r13 + DATASET_DTYPE], eax
     
+    ; Debug: print n_features
+    push rax
+    lea rdi, [rel dbg_features]
+    call print_string
+    mov rdi, [rsp+24]               ; n_features (need to recalculate offset due to push)
+    call print_int
+    lea rdi, [rel dbg_nl]
+    call print_string
+    pop rax
+    
     ; Create data tensor
     mov rax, [rsp+40]
     mov [rsp+48], rax               ; shape[0] = n_samples
@@ -217,6 +242,8 @@ dataset_load_csv:
     lea rsi, [rsp+48]
     mov edx, [rsp+24]
     call tensor_create
+    test rax, rax
+    jz .alloc_failed
     mov [r13 + DATASET_DATA], rax
     mov r14, rax                    ; data tensor
     
@@ -227,6 +254,8 @@ dataset_load_csv:
     lea rsi, [rsp+48]
     mov edx, [rsp+24]
     call tensor_create
+    test rax, rax
+    jz .alloc_failed
     mov [r13 + DATASET_LABELS], rax
     mov r15, rax                    ; labels tensor
     

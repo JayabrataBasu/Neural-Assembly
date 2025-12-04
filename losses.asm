@@ -384,6 +384,7 @@ cross_entropy_loss:
 .exp_sum_f64:
     movsd [rsp+48], xmm0            ; save max
     vxorpd xmm2, xmm2, xmm2         ; sum = 0
+    movsd [rsp+56], xmm2            ; save sum to stack
     
     xor r9, r9
 .exp_loop_f64:
@@ -409,6 +410,7 @@ cross_entropy_loss:
     pop rdi
     
     movsd [rdi + r9*8], xmm0
+    movsd xmm2, [rsp+56]            ; reload sum from stack
     addsd xmm2, xmm0
     movsd [rsp+56], xmm2
     
@@ -459,6 +461,7 @@ cross_entropy_loss:
 .exp_sum_f32:
     movss [rsp+48], xmm0
     vxorps xmm2, xmm2, xmm2
+    movss [rsp+56], xmm2            ; save sum to stack
     
     xor r9, r9
 .exp_loop_f32:
@@ -488,6 +491,7 @@ cross_entropy_loss:
     pop rdi
     
     movss [rdi + r9*4], xmm0
+    movss xmm2, [rsp+56]            ; reload sum from stack
     addss xmm2, xmm0
     movss [rsp+56], xmm2
     
@@ -520,6 +524,7 @@ cross_entropy_loss:
     mov [rsp+64], rax               ; loss tensor
     
     vxorpd xmm0, xmm0, xmm0         ; sum = 0
+    movsd [rsp+72], xmm0            ; save loss sum to stack
     
     mov rdi, [rsp+32]               ; softmax data
     mov rsi, [r13 + TENSOR_DATA]    ; target indices
@@ -536,8 +541,9 @@ cross_entropy_loss:
     cmp rbx, rcx
     jge .store_loss_f64
     
-    ; Get target class for this sample
-    mov r9, [rsi + rbx*8]           ; target_indices[b] (assuming uint64)
+    ; Get target class for this sample (stored as float64, convert to int)
+    movsd xmm2, [rsi + rbx*8]
+    cvttsd2si r9, xmm2              ; convert to int64 (truncate)
     
     ; Get softmax[b, target]
     mov rax, rbx
@@ -580,12 +586,18 @@ cross_entropy_loss:
     jmp .create_node
 
 .loss_f32:
+    ; Initialize loss sum for f32
+    vxorps xmm0, xmm0, xmm0
+    movss [rsp+72], xmm0
+    
     xor rbx, rbx
 .loss_f32_loop:
     cmp rbx, rcx
     jge .store_loss_f32
     
-    mov r9d, [rsi + rbx*4]          ; target as int32
+    ; target is stored as float, convert to int
+    movss xmm2, [rsi + rbx*4]       ; load target as float
+    cvttss2si r9d, xmm2             ; convert to int32 (truncate)
     
     mov rax, rbx
     imul rax, r8
@@ -739,7 +751,9 @@ cross_entropy_loss_backward:
     cmp r9, rcx
     jge .done
     
-    mov r10, [rdx + r9*8]           ; target class
+    ; Load target as float and convert to int
+    movsd xmm1, [rdx + r9*8]
+    cvttsd2si r10, xmm1             ; target class (as int)
     
     xor r11, r11                    ; class idx
 .bwd_f64_class:
@@ -788,7 +802,9 @@ cross_entropy_loss_backward:
     cmp r9, rcx
     jge .done
     
-    mov r10d, [rdx + r9*4]
+    ; Load target as float and convert to int
+    movss xmm1, [rdx + r9*4]
+    cvttss2si r10d, xmm1
     
     xor r11, r11
 .bwd_f32_class:

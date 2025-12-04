@@ -33,6 +33,16 @@ section .data
     msg_building:   db "[*] Building model...", 10, 0
     msg_model_ok:   db "[+] Model built: ", 0
     msg_params:     db " parameters", 10, 0
+    msg_opt_ok:     db "[DEBUG] Optimizer created OK", 10, 0
+    msg_opt_null:   db "[ERROR] Optimizer is NULL!", 10, 0
+    msg_epoch_entry: db "[DEBUG] Entered train_epoch", 10, 0
+    msg_batch_size:  db "[DEBUG] Got batch_size", 10, 0
+    msg_dataset_notnull:  db "[DEBUG] Dataset not null", 10, 0
+    msg_batch_got:   db "[DEBUG] Got batch X", 10, 0
+    msg_node_ok:     db "[DEBUG] Input node created", 10, 0
+    msg_forward_ok:  db "[DEBUG] Forward pass done", 10, 0
+    msg_loss_ok:     db "[DEBUG] Loss computed", 10, 0
+    msg_backward_start: db "[DEBUG] Starting backward pass", 10, 0
     msg_training:   db "[*] Starting training...", 10, 0
     msg_epoch:      db "Epoch ", 0
     msg_loss:       db " | Loss: ", 0
@@ -48,6 +58,11 @@ section .data
     msg_newline:    db 10, 0
     msg_separator:  db "-------------------------------------------", 10, 0
     msg_error:      db "[!] Error: ", 0
+    msg_trainfile:  db "[DEBUG] Train file: ", 0
+    msg_no_trainfile: db "[DEBUG] No train file in config!", 10, 0
+    msg_dataset_ok: db "[DEBUG] Dataset loaded OK", 10, 0
+    msg_dataset_fail: db "[DEBUG] Dataset load FAILED!", 10, 0
+    newline:        db 10, 0
     
     ; Default output filename
     default_model:  db "model.bin", 0
@@ -61,6 +76,17 @@ section .data
     msg_pass:       db "PASS", 10, 0
     msg_fail:       db "FAIL", 10, 0
     msg_test_done:  db "=== Tests Complete ===", 10, 0
+    opt_type_msg:   db "[DEBUG] Optimizer type: ", 0
+    opt_fn_msg:     db "[DEBUG] Step fn ptr: ", 0
+    loss_val_msg:   db "[DEBUG] Loss val: ", 0
+    logit_msg:      db "[DEBUG] First logit: ", 0
+    input_msg:      db "[DEBUG] First input: ", 0
+    weight_msg:     db "[DEBUG] First weight: ", 0
+    linear_out_msg: db "[DEBUG] Linear out: ", 0
+    relu_out_msg:   db "[DEBUG] ReLU out: ", 0
+    softmax_out_msg: db "[DEBUG] Softmax out: ", 0
+    acc_loss_msg:   db "[DEBUG] Acc loss: ", 0
+    num_batches_msg: db "[DEBUG] Num batches: ", 0
     
     ; Float format strings
     float_format:   db "%.4f", 0
@@ -139,10 +165,10 @@ section .text
     extern softmax_backward
     
     ; Losses
-    extern mse_forward
-    extern mse_backward
-    extern cross_entropy_forward
-    extern cross_entropy_backward
+    extern mse_loss
+    extern mse_loss_backward
+    extern cross_entropy_loss
+    extern cross_entropy_loss_backward
     
     ; Optimizers
     extern sgd_create
@@ -152,6 +178,7 @@ section .text
     
     ; Dataset
     extern dataset_load
+    extern dataset_load_csv
     extern dataset_get_batch
     extern dataset_shuffle
     
@@ -340,6 +367,12 @@ cmd_train_handler:
     lea rdi, [msg_config_ok]
     call print_string
     
+    ; Debug: print parsed epochs value
+    mov rdi, r14
+    mov eax, [rdi + 24]
+    mov edi, eax
+    call print_int
+
     ; Print configuration summary
     call print_config_summary
     
@@ -368,12 +401,48 @@ cmd_train_handler:
     lea rdi, [msg_params]
     call print_string
     
+    ; Debug: print first weight
+    mov rax, [r15 + 8]          ; first layer (Linear)
+    test rax, rax
+    jz .skip_weight_debug
+    cmp rax, 100                ; not a marker
+    jb .skip_weight_debug
+    mov rax, [rax + 8]          ; module->params
+    mov rax, [rax]              ; params[0] = weight tensor
+    test rax, rax
+    jz .skip_weight_debug
+    mov rax, [rax]              ; tensor->data
+    test rax, rax
+    jz .skip_weight_debug
+    
+    push rax
+    lea rdi, [rel weight_msg]
+    call print_string
+    pop rax
+    movss xmm0, [rax]
+    cvtss2sd xmm0, xmm0
+    call print_float
+    lea rdi, [rel newline]
+    call print_string
+    
+.skip_weight_debug:
+    
     ; Create optimizer
     mov rdi, r14
     mov rsi, r15
     call create_optimizer
     mov [optimizer_ptr], rax
     mov rbx, rax
+    
+    ; Debug: check optimizer is not NULL
+    test rax, rax
+    jnz .opt_ok
+    lea rdi, [msg_opt_null]
+    call print_string
+    jmp .train_config_error
+.opt_ok:
+    lea rdi, [msg_opt_ok]
+    call print_string
     
     ; Load dataset
     mov rdi, r14
@@ -432,6 +501,7 @@ cmd_train_handler:
     call print_string
     
     movss xmm0, [total_loss]
+    cvtss2sd xmm0, xmm0         ; convert to double for print_float
     mov edi, 4                  ; precision
     call print_float
     
@@ -462,6 +532,30 @@ cmd_train_handler:
     lea rdi, [msg_newline]
     call print_string
     
+    ; Debug: print first weight after epoch
+    mov r15, [model_ptr]
+    mov rax, [r15 + 8]              ; first layer (Linear)
+    test rax, rax
+    jz .next_epoch
+    cmp rax, 100
+    jb .next_epoch
+    mov rax, [rax + 8]              ; module->params
+    mov rax, [rax]                  ; params[0] = weight tensor
+    test rax, rax
+    jz .next_epoch
+    mov rax, [rax]                  ; tensor->data
+    test rax, rax
+    jz .next_epoch
+    push rax
+    lea rdi, [rel weight_msg]
+    call print_string
+    pop rax
+    movss xmm0, [rax]
+    cvtss2sd xmm0, xmm0
+    call print_float
+    lea rdi, [rel newline]
+    call print_string
+
 .next_epoch:
     inc dword [current_epoch]
     jmp .train_epoch_loop
@@ -670,7 +764,7 @@ build_model:
     ; Create first linear layer
     mov edi, r13d               ; in_features
     mov esi, r14d               ; out_features
-    mov edx, 1                  ; bias = true
+    xor edx, edx                ; dtype = DT_FLOAT32 (0)
     call linear_create
     
     mov rbx, [rbp - 40]
@@ -682,7 +776,7 @@ build_model:
     ; Create second linear layer
     mov edi, r14d               ; in_features (hidden)
     mov esi, [r12 + 8]          ; out_features
-    mov edx, 1
+    xor edx, edx                ; dtype = DT_FLOAT32 (0)
     call linear_create
     
     mov rbx, [rbp - 40]
@@ -793,12 +887,146 @@ count_parameters:
 create_optimizer:
     push rbp
     mov rbp, rsp
+    push rbx
     push r12
     push r13
-    sub rsp, 16
+    push r14
+    push r15
+    sub rsp, 96                 ; local storage
     
-    mov r12, rdi                ; config
-    mov r13, rsi                ; model
+    ; Stack layout:
+    ; [rbp-56] = config pointer
+    ; [rbp-64] = model pointer
+    ; [rbp-72] = params array pointer
+    ; [rbp-80] = param_nodes array pointer
+    ; [rbp-84] = total n_params count
+    ; [rbp-88] = current param index
+    
+    mov [rbp-56], rdi           ; save config
+    mov [rbp-64], rsi           ; save model
+    
+    ; First, count total params across all layers
+    ; Model structure: offset 0 = num_layers, offset 8+ = layer pointers
+    mov r12, rsi                ; model
+    mov ecx, [r12]              ; num_layers
+    xor r13d, r13d              ; total params count
+    lea r14, [r12 + 8]          ; layer pointer array
+    
+.count_params_loop:
+    test ecx, ecx
+    jz .count_params_done
+    
+    mov rax, [r14]              ; layer pointer
+    cmp rax, 100                ; skip markers (1=ReLU, 2=Softmax)
+    jb .count_next_layer
+    
+    ; Real layer - add its n_params
+    add r13d, [rax]             ; module->n_params at offset 0
+    
+.count_next_layer:
+    add r14, 8
+    dec ecx
+    jmp .count_params_loop
+    
+.count_params_done:
+    mov [rbp-84], r13d          ; save total count
+    
+    ; Allocate params array (n_params * 8 bytes)
+    mov eax, r13d
+    shl eax, 3
+    mov edi, eax
+    call mem_alloc
+    test rax, rax
+    jz .opt_error
+    mov [rbp-72], rax           ; params array
+    
+    ; Allocate param_nodes array (n_params * 8 bytes)
+    mov eax, [rbp-84]
+    shl eax, 3
+    mov edi, eax
+    call mem_alloc
+    test rax, rax
+    jz .opt_error
+    mov [rbp-80], rax           ; param_nodes array
+    
+    ; Now collect params and param_nodes from all layers
+    mov r12, [rbp-64]           ; model
+    mov ecx, [r12]              ; num_layers
+    lea r14, [r12 + 8]          ; layer pointer array
+    mov dword [rbp-88], 0       ; current index = 0
+    mov r15, [rbp-72]           ; params dest
+    mov rbx, [rbp-80]           ; param_nodes dest
+    
+.collect_loop:
+    test ecx, ecx
+    jz .collect_done
+    
+    push rcx                    ; save counter
+    
+    mov rax, [r14]              ; layer pointer
+    cmp rax, 100
+    jb .collect_next
+    
+    ; Module struct:
+    ;   offset 0: n_params
+    ;   offset 8: params (Tensor**)
+    ;   offset 16: param_nodes (Node**)
+    mov r12, rax                ; module
+    mov ecx, [r12]              ; layer's n_params
+    mov rsi, [r12 + 8]          ; params array
+    mov rdi, [r12 + 16]         ; param_nodes array
+    
+.collect_layer_params:
+    test ecx, ecx
+    jz .collect_next
+    
+    ; Copy param tensor pointer
+    mov rax, [rsi]
+    mov [r15], rax
+    add r15, 8
+    add rsi, 8
+    
+    ; Copy param_node pointer (for optimizer to get grad later)
+    mov rax, [rdi]
+    mov [rbx], rax
+    add rbx, 8
+    add rdi, 8
+    
+    dec ecx
+    jmp .collect_layer_params
+    
+.collect_next:
+    pop rcx
+    add r14, 8
+    dec ecx
+    jmp .collect_loop
+    
+.collect_done:
+    ; Now create the optimizer with collected arrays
+    mov r12, [rbp-56]           ; config
+    mov rdi, [rbp-72]           ; params array
+    mov rsi, [rbp-80]           ; param_nodes array
+    mov edx, [rbp-84]           ; n_params
+    
+    ; Debug: print optimizer type
+    push rdi
+    push rsi
+    push rdx
+    mov eax, [r12 + 48]         ; optimizer_type
+    push rax
+    lea rdi, [rel opt_type_msg]
+    call print_string
+    pop rax
+    push rax
+    mov edi, eax
+    call print_int
+    lea rdi, [rel newline]
+    call print_string
+    pop rax
+    pop rdx
+    pop rsi
+    pop rdi
+    mov r12, [rbp-56]           ; reload config (might be clobbered)
     
     ; Check optimizer type
     mov eax, [r12 + 48]         ; optimizer_type
@@ -807,23 +1035,34 @@ create_optimizer:
     
     ; Default: SGD
     movss xmm0, [r12 + 32]      ; learning_rate
+    cvtss2sd xmm0, xmm0         ; convert to double
     movss xmm1, [r12 + 52]      ; momentum
-    mov rdi, r13
+    cvtss2sd xmm1, xmm1
     call sgd_create
     jmp .opt_done
     
 .create_adam:
     movss xmm0, [r12 + 32]      ; learning_rate
+    cvtss2sd xmm0, xmm0
     movss xmm1, [r12 + 56]      ; beta1
+    cvtss2sd xmm1, xmm1
     movss xmm2, [r12 + 60]      ; beta2
+    cvtss2sd xmm2, xmm2
     movss xmm3, [r12 + 64]      ; epsilon
-    mov rdi, r13
+    cvtss2sd xmm3, xmm3
     call adam_create
+    jmp .opt_done
+    
+.opt_error:
+    xor eax, eax
     
 .opt_done:
-    add rsp, 16
+    add rsp, 96
+    pop r15
+    pop r14
     pop r13
     pop r12
+    pop rbx
     pop rbp
     ret
 
@@ -836,15 +1075,54 @@ load_training_data:
     push rbp
     mov rbp, rsp
     push r12
+    push r13
     
     mov r12, rdi
     
-    ; Get train file from config
-    mov rdi, [r12 + 68]         ; train_file pointer
+    ; Debug: check train_file
+    mov rdi, [r12 + 68]         ; train_file pointer (OFF_TRAIN_FILE = 68)
+    mov r13, rdi
     test rdi, rdi
-    jz .no_train_file
+    jnz .have_train_file
     
-    call dataset_load
+    ; Print "no train file"
+    lea rdi, [msg_no_trainfile]
+    call print_string
+    jmp .no_train_file
+    
+.have_train_file:
+    ; Print the train file path
+    lea rdi, [msg_trainfile]
+    call print_string
+    mov rdi, r13
+    call print_string
+    lea rdi, [newline]
+    call print_string
+    
+    ; Get train file from config
+    mov rdi, r13                ; train_file pointer
+
+    ; Call dataset_load_csv(data_path, label_path, n_features=input_size, dtype=DT_FLOAT32)
+    mov rsi, [r12 + 84]         ; train_label_file pointer (OFF_TRAIN_LABEL_FILE = 84)
+    mov edx, [r12]              ; input_size (n_features) - 32-bit value
+    xor rcx, rcx                ; dtype = DT_FLOAT32 (0)
+    call dataset_load_csv
+    
+    ; Save dataset pointer
+    mov r13, rax
+    
+    ; Debug: check if dataset loaded
+    test rax, rax
+    jnz .dataset_ok
+    lea rdi, [msg_dataset_fail]
+    call print_string
+    xor eax, eax                ; return NULL
+    jmp .load_done
+    
+.dataset_ok:
+    lea rdi, [msg_dataset_ok]
+    call print_string
+    mov rax, r13                ; restore dataset pointer
     jmp .load_done
     
 .no_train_file:
@@ -852,6 +1130,7 @@ load_training_data:
     xor eax, eax
     
 .load_done:
+    pop r13
     pop r12
     pop rbp
     ret
@@ -868,11 +1147,15 @@ load_test_data:
     
     mov r12, rdi
     
-    mov rdi, [r12 + 76]         ; test_file pointer
+    mov rdi, [r12 + 76]         ; test_file pointer (OFF_TEST_FILE = 76)
     test rdi, rdi
     jz .no_test_file
-    
-    call dataset_load
+
+    ; Call dataset_load_csv(data_path, label_path, n_features=input_size, dtype=DT_FLOAT32)
+    mov rsi, [r12 + 92]         ; test_label_file pointer (OFF_TEST_LABEL_FILE = 92)
+    mov rdx, [r12]              ; input_size
+    xor rcx, rcx                ; dtype = DT_FLOAT32
+    call dataset_load_csv
     jmp .test_load_done
     
 .no_test_file:
@@ -897,26 +1180,73 @@ train_epoch:
     push r13
     push r14
     push r15
-    sub rsp, 72
+    sub rsp, 96                 ; more stack space for batch tensors
     
     mov r12, rdi                ; model
     mov r13, rsi                ; optimizer
     mov r14, rdx                ; dataset
     mov r15, rcx                ; config
     
+    ; Debug: print entry
+    push r12
+    push r13
+    push r14
+    push r15
+    lea rdi, [msg_epoch_entry]
+    call print_string
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    
+    ; Stack layout:
+    ; [rbp - 48] = batch_size
+    ; [rbp - 52] = num_batches
+    ; [rbp - 56] = current_batch
+    ; [rbp - 64] = batch_x tensor pointer
+    ; [rbp - 72] = batch_y tensor pointer
+    ; [rbp - 80] = accumulated loss
+    
     ; Get batch size
     mov eax, [r15 + 28]         ; batch_size
     mov [rbp - 48], eax
+    
+    ; Debug
+    push rax
+    push r14
+    push r15
+    lea rdi, [msg_batch_size]
+    call print_string
+    pop r15
+    pop r14
+    pop rax
+    
+    ; Initialize accumulated loss to 0.0
+    xorps xmm0, xmm0
+    movss [rbp - 80], xmm0
     
     ; Get number of batches (dataset_size / batch_size)
     test r14, r14
     jz .epoch_done
     
+    ; Debug - dataset is not null
+    push r14
+    push r15
+    lea rdi, [msg_dataset_notnull]
+    call print_string
+    pop r15
+    pop r14
+    
     mov eax, [r14]              ; num_samples
     xor edx, edx
     mov ecx, [rbp - 48]
+    test ecx, ecx
+    jz .epoch_done              ; avoid divide by zero
     div ecx                     ; eax = num_batches
     mov [rbp - 52], eax
+    
+    test eax, eax
+    jz .epoch_done              ; no batches
     
     mov dword [rbp - 56], 0     ; current batch
     
@@ -925,38 +1255,262 @@ train_epoch:
     cmp eax, [rbp - 52]
     jge .epoch_done
     
-    ; Get next batch
-    mov rdi, r14
-    mov esi, [rbp - 56]
-    mov edx, [rbp - 48]
+    ; Get next batch - pass output pointers for X and Y
+    mov rdi, r14                    ; dataset
+    mov rsi, [rbp - 56]             ; batch_index (zero-extend)
+    movzx esi, si
+    mov rdx, [rbp - 48]             ; batch_size (zero-extend)
+    movzx edx, dx
+    lea rcx, [rbp - 64]             ; &out_x
+    lea r8, [rbp - 72]              ; &out_y
     call dataset_get_batch
     
-    ; rax = batch data pointer
+    ; Create input node from batch_x tensor
+    mov rdi, [rbp - 64]         ; batch_x tensor
+    test rdi, rdi
+    jz .next_batch              ; skip if NULL
+    
+    ; Debug: print first input value
+    push rdi
+    mov rcx, [rdi]              ; tensor->data
+    test rcx, rcx
+    jz .skip_input_debug
+    lea rdi, [rel input_msg]
+    call print_string
+    pop rdi
+    push rdi
+    mov rcx, [rdi]
+    movss xmm0, [rcx]
+    cvtss2sd xmm0, xmm0
+    call print_float
+    lea rdi, [rel newline]
+    call print_string
+    jmp .done_input_debug
+.skip_input_debug:
+    pop rdi
+    push rdi
+.done_input_debug:
+    pop rdi
+    
+    ; Debug
+    push rdi
+    push r12
+    push r13
+    push r14
+    push r15
+    lea rdi, [msg_batch_got]
+    call print_string
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rdi
+    
+    mov rsi, 0                  ; requires_grad = false for input
+    call node_create
+    test rax, rax
+    jz .next_batch
+    mov rbx, rax                ; input node
+    
+    ; Debug
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    lea rdi, [msg_node_ok]
+    call print_string
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    
     ; Forward pass through model
     mov rdi, r12                ; model
-    mov rsi, rax                ; input batch
+    mov rsi, rbx                ; input node
     call model_forward
     
-    ; Calculate loss
-    ; TODO: implement loss computation
+    ; Debug: check first logit value
+    push rax
+    test rax, rax
+    jz .skip_logit_debug
+    mov rcx, [rax]              ; node->value (tensor)
+    test rcx, rcx
+    jz .skip_logit_debug
+    mov rcx, [rcx]              ; tensor->data
+    test rcx, rcx
+    jz .skip_logit_debug
     
-    ; Backward pass
-    mov rdi, r12
-    call model_backward
+    ; Print first logit
+    push rcx
+    lea rdi, [rel logit_msg]
+    call print_string
+    pop rcx
+    movss xmm0, [rcx]
+    cvtss2sd xmm0, xmm0
+    call print_float
+    lea rdi, [rel newline]
+    call print_string
+    
+.skip_logit_debug:
+    pop rax
+    
+    ; Debug
+    push rax
+    push r12
+    push r13
+    push r14
+    push r15
+    lea rdi, [msg_forward_ok]
+    call print_string
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rax
+    
+    test rax, rax
+    jz .next_batch
+    mov rbx, rax                ; predictions node
+    
+    ; Calculate loss using cross_entropy_loss
+    mov rdi, rbx                ; predictions node
+    mov rsi, [rbp - 72]         ; batch_y tensor (labels)
+    call cross_entropy_loss
+    
+    ; Debug
+    push rax
+    push r12
+    push r13
+    push r14
+    push r15
+    lea rdi, [msg_loss_ok]
+    call print_string
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rax
+    
+    test rax, rax
+    jz .next_batch
+    
+    ; Save loss node for backward pass
+    mov [rbp - 88], rax         ; save loss node at rbp-88
+    
+    ; rax = loss node - get scalar value and accumulate
+    ; NODE_VALUE is at offset 0, TENSOR_DATA is at offset 0
+    mov rcx, [rax]              ; NODE_VALUE = loss tensor
+    test rcx, rcx
+    jz .do_backward
+    mov rcx, [rcx]              ; TENSOR_DATA = data pointer
+    test rcx, rcx
+    jz .do_backward
+    movss xmm0, [rcx]           ; load loss value (float32)
+    
+    ; Debug: print this batch's loss
+    push rcx
+    push rax
+    sub rsp, 8
+    movss [rsp], xmm0
+    lea rdi, [rel loss_val_msg]
+    call print_string
+    movss xmm0, [rsp]
+    cvtss2sd xmm0, xmm0
+    call print_float
+    lea rdi, [rel newline]
+    call print_string
+    add rsp, 8
+    pop rax
+    pop rcx
+    
+    movss xmm0, [rcx]           ; reload loss
+    addss xmm0, [rbp - 80]      ; accumulate
+    movss [rbp - 80], xmm0
+    
+.do_backward:
+    ; Set loss gradient to 1.0 for backward pass
+    ; TODO: loss node's gradient should be initialized
+    
+    ; Debug
+    push r12
+    push r13
+    push r14
+    push r15
+    lea rdi, [msg_backward_start]
+    call print_string
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    
+    ; Backward pass - pass loss node, not model!
+    mov rdi, [rbp - 88]         ; loss node
+    call autograd_backward
     
     ; Optimizer step
     mov rdi, r13
     call optimizer_step
     
-    ; Zero gradients
-    mov rdi, r12
-    call model_zero_grad
+    ; Zero gradients - use the optimizer's zero_grad function
+    mov rdi, r13
+    mov rax, [r13 + 32]         ; OPT_ZERO_GRAD_FN offset
+    test rax, rax
+    jz .next_batch
+    call rax
     
+.next_batch:
     inc dword [rbp - 56]
     jmp .batch_loop
     
 .epoch_done:
-    add rsp, 72
+    ; Debug: print accumulated loss and num_batches
+    movss xmm0, [rbp - 80]
+    sub rsp, 8
+    movss [rsp], xmm0
+    lea rdi, [rel acc_loss_msg]
+    call print_string
+    movss xmm0, [rsp]
+    cvtss2sd xmm0, xmm0
+    call print_float
+    lea rdi, [rel newline]
+    call print_string
+    lea rdi, [rel num_batches_msg]
+    call print_string
+    mov edi, [rbp - 52]
+    call print_int
+    lea rdi, [rel newline]
+    call print_string
+    add rsp, 8
+    
+    ; Store accumulated loss to global total_loss
+    movss xmm0, [rbp - 80]
+    
+    ; Divide by number of batches to get average loss
+    mov eax, [rbp - 52]
+    test eax, eax
+    jz .store_loss
+    cvtsi2ss xmm1, eax
+    divss xmm0, xmm1
+    
+.store_loss:
+    ; Debug: print what we're storing
+    sub rsp, 8
+    movss [rsp], xmm0
+    lea rdi, [rel acc_loss_msg]  ; reuse message
+    call print_string
+    movss xmm0, [rsp]
+    cvtss2sd xmm0, xmm0
+    call print_float
+    lea rdi, [rel newline]
+    call print_string
+    movss xmm0, [rsp]
+    add rsp, 8
+    
+    movss [total_loss], xmm0
+    
+    add rsp, 96
     pop r15
     pop r14
     pop r13
@@ -1001,18 +1555,99 @@ model_forward:
     mov rdi, rax
     mov rsi, r13
     call linear_forward
+    
+    ; Debug: print first output after linear
+    push rax
+    push r12
+    push rbx
+    test rax, rax
+    jz .skip_lin_debug
+    mov rcx, [rax]              ; node->value
+    test rcx, rcx
+    jz .skip_lin_debug
+    mov rcx, [rcx]              ; tensor->data
+    test rcx, rcx
+    jz .skip_lin_debug
+    push rcx
+    lea rdi, [rel linear_out_msg]
+    call print_string
+    pop rcx
+    movss xmm0, [rcx]
+    cvtss2sd xmm0, xmm0
+    call print_float
+    lea rdi, [rel newline]
+    call print_string
+.skip_lin_debug:
+    pop rbx
+    pop r12
+    pop rax
+    
     mov r13, rax
     jmp .forward_next
     
 .apply_relu:
     mov rdi, r13
     call relu_forward
+    
+    ; Debug: print first output after relu
+    push rax
+    push r12
+    push rbx
+    test rax, rax
+    jz .skip_relu_debug
+    mov rcx, [rax]              ; node->value
+    test rcx, rcx
+    jz .skip_relu_debug
+    mov rcx, [rcx]              ; tensor->data
+    test rcx, rcx
+    jz .skip_relu_debug
+    push rcx
+    lea rdi, [rel relu_out_msg]
+    call print_string
+    pop rcx
+    movss xmm0, [rcx]
+    cvtss2sd xmm0, xmm0
+    call print_float
+    lea rdi, [rel newline]
+    call print_string
+.skip_relu_debug:
+    pop rbx
+    pop r12
+    pop rax
+    
     mov r13, rax
     jmp .forward_next
     
 .apply_softmax:
     mov rdi, r13
     call softmax_forward
+    
+    ; Debug: print first output after softmax
+    push rax
+    push r12
+    push rbx
+    test rax, rax
+    jz .skip_sm_debug
+    mov rcx, [rax]              ; node->value
+    test rcx, rcx
+    jz .skip_sm_debug
+    mov rcx, [rcx]              ; tensor->data
+    test rcx, rcx
+    jz .skip_sm_debug
+    push rcx
+    lea rdi, [rel softmax_out_msg]
+    call print_string
+    pop rcx
+    movss xmm0, [rcx]
+    cvtss2sd xmm0, xmm0
+    call print_float
+    lea rdi, [rel newline]
+    call print_string
+.skip_sm_debug:
+    pop rbx
+    pop r12
+    pop rax
+    
     mov r13, rax
     
 .forward_next:
@@ -1062,23 +1697,25 @@ optimizer_step:
     mov rbp, rsp
     push r12
     
-    mov r12, rdi
+    mov r12, rdi                ; optimizer
     
-    ; Check optimizer type
-    mov eax, [r12]              ; type at offset 0
-    cmp eax, 1
-    je .adam_step
+    ; Debug: print function pointer as integer (hex-like)
+    push r12
+    lea rdi, [rel opt_fn_msg]
+    call print_string
+    pop r12
+    push r12
+    mov rdi, [r12 + 24]         ; step_fn
+    call print_int
+    lea rdi, [rel newline]
+    call print_string
+    pop r12
     
-    ; SGD
+    ; Call through function pointer at OPT_STEP_FN (offset 24)
+    mov rax, [r12 + 24]         ; step_fn
     mov rdi, r12
-    call sgd_step
-    jmp .step_done
+    call rax
     
-.adam_step:
-    mov rdi, r12
-    call adam_step
-    
-.step_done:
     pop r12
     pop rbp
     ret

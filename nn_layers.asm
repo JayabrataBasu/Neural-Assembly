@@ -515,10 +515,22 @@ linear_forward_fn:
 ; Arguments:
 ;   RDI = Module* self
 ;   RSI = Node* input
-;   RDX = Node** output
+; Returns:
+;   RAX = Node* output
 ; =============================================================================
 linear_forward:
-    jmp linear_forward_fn
+    push rbp
+    mov rbp, rsp
+    sub rsp, 16
+    
+    ; RDI = module, RSI = input, RDX = &output
+    lea rdx, [rbp - 8]              ; output pointer
+    call linear_forward_fn
+    
+    mov rax, [rbp - 8]              ; return output node
+    add rsp, 16
+    pop rbp
+    ret
 
 ; =============================================================================
 ; linear_backward - Backward for Linear layer

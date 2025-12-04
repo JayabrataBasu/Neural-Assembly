@@ -787,6 +787,7 @@ node_softmax:
     
     ; Compute exp(x - max) and sum
     vxorpd xmm2, xmm2, xmm2         ; sum = 0
+    movsd [rsp+40], xmm2            ; initialize sum at [rsp+40] (new location)
     xor r8, r8
 .exp_sum_f64:
     cmp r8, r15
@@ -797,7 +798,7 @@ node_softmax:
     push r8
     push rbx
     movsd xmm0, [rsi + r8*8]
-    subsd xmm0, [rsp+64]            ; x - max (adjusted for pushes)
+    subsd xmm0, [rsp+64]            ; x - max (adjusted for pushes: [rsp+32] -> [rsp+64])
     sub rsp, 8
     call exp wrt ..plt
     add rsp, 8
@@ -807,14 +808,15 @@ node_softmax:
     pop rdi
     
     movsd [rdi + r8*8], xmm0        ; out[i] = exp(x - max)
+    movsd xmm2, [rsp+40]            ; reload sum
     addsd xmm2, xmm0                ; sum += exp
-    movsd [rsp+32], xmm2            ; save sum
+    movsd [rsp+40], xmm2            ; save sum back
     
     inc r8
     jmp .exp_sum_f64
 
 .normalize_f64:
-    movsd xmm2, [rsp+32]            ; get sum back
+    movsd xmm2, [rsp+40]            ; get sum from new location
     xor r8, r8
 .div_sum_f64:
     cmp r8, r15
@@ -880,6 +882,7 @@ node_softmax:
     pop rdi
     
     movss [rdi + r8*4], xmm0
+    movss xmm2, [rsp+32]            ; reload sum (clobbered by exp)
     addss xmm2, xmm0
     movss [rsp+32], xmm2
     

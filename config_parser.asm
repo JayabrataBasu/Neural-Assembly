@@ -46,6 +46,8 @@ section .data
     ; Key names - Data
     key_train_file:     db "train_file", 0
     key_test_file:      db "test_file", 0
+    key_train_label_file: db "train_label_file", 0
+    key_test_label_file:  db "test_label_file", 0
     key_val_split:      db "val_split", 0
     key_shuffle:        db "shuffle", 0
     key_normalize:      db "normalize", 0
@@ -74,6 +76,9 @@ section .data
     err_config_section: db "Error: Unknown section: ", 0
     err_config_key:     db "Error: Unknown key: ", 0
     newline:            db 10, 0
+    dbg_section:        db "[DBG] Section: ", 0
+    dbg_data_key:       db "[DBG] process_data_key: ", 0
+    dbg_newline:        db 10, 0
 
 section .bss
     ; Configuration structure (256 bytes)
@@ -110,6 +115,7 @@ section .text
     
     extern mem_alloc
     extern mem_free
+    extern print_string
 
 ; ============================================================================
 ; CONFIGURATION STRUCTURE
@@ -134,11 +140,13 @@ section .text
 ; 64       4      epsilon (float)
 ; 68       8      train_file (pointer)
 ; 76       8      test_file (pointer)
-; 84       4      val_split (float)
-; 88       4      shuffle (bool)
-; 92       4      normalize (bool)
-; 96       4      hidden_sizes array (up to 8 hidden layers)
-; 128      128    reserved
+; 84       8      train_label_file (pointer)
+; 92       8      test_label_file (pointer)
+; 100      4      val_split (float)
+; 104      4      shuffle (bool)
+; 108      4      normalize (bool)
+; 112      4      hidden_sizes array (up to 8 hidden layers)
+; 144      112    reserved
 ; ============================================================================
 
 CONFIG_SIZE             equ 256
@@ -161,8 +169,10 @@ OFF_BETA2               equ 60
 OFF_EPSILON             equ 64
 OFF_TRAIN_FILE          equ 68
 OFF_TEST_FILE           equ 76
-OFF_VAL_SPLIT           equ 84
-OFF_SHUFFLE             equ 88
+OFF_TRAIN_LABEL_FILE    equ 84
+OFF_TEST_LABEL_FILE     equ 92
+OFF_VAL_SPLIT           equ 100
+OFF_SHUFFLE             equ 104
 OFF_NORMALIZE           equ 92
 OFF_HIDDEN_SIZES        equ 96
 
@@ -389,6 +399,17 @@ config_parse:
     mov byte [rdi], 0           ; null terminate
     inc rsi                     ; skip ']'
     
+    ; Save buffer position - rsi will be clobbered by section comparisons
+    push rsi
+    
+    ; Debug: print parsed section
+    lea rdi, [dbg_section]
+    call print_string
+    lea rdi, [section_buffer]
+    call print_string
+    lea rdi, [dbg_newline]
+    call print_string
+    
     ; Identify section
     lea rdi, [section_buffer]
     call str_to_lower
@@ -418,25 +439,31 @@ config_parse:
     jnz .set_section_data
     
     ; Unknown section - skip
+    pop rsi                     ; restore buffer position
     jmp .find_newline
     
 .set_section_model:
     mov qword [current_section], 1
+    pop rsi                     ; restore buffer position
     jmp .find_newline
     
 .set_section_training:
     mov qword [current_section], 2
+    pop rsi                     ; restore buffer position
     jmp .find_newline
     
 .set_section_optimizer:
     mov qword [current_section], 3
+    pop rsi                     ; restore buffer position
     jmp .find_newline
     
 .set_section_data:
     mov qword [current_section], 4
+    pop rsi                     ; restore buffer position
     jmp .find_newline
     
 .section_error:
+    pop rsi                     ; restore buffer position
     jmp .find_newline
     
 .parse_key_value:
@@ -517,19 +544,27 @@ config_parse:
     jmp .find_newline
     
 .process_model:
+    push rsi
     call process_model_key
+    pop rsi
     jmp .find_newline
     
 .process_training:
+    push rsi
     call process_training_key
+    pop rsi
     jmp .find_newline
     
 .process_optimizer:
+    push rsi
     call process_optimizer_key
+    pop rsi
     jmp .find_newline
     
 .process_data:
+    push rsi
     call process_data_key
+    pop rsi
     jmp .find_newline
     
 .kv_error:
@@ -895,6 +930,22 @@ process_data_key:
     push rbp
     mov rbp, rsp
     push rbx
+    push r13
+    
+    ; Get r13 from caller (it's a callee-saved register, so should still be config pointer)
+    ; But save our copy to be safe
+    
+    ; Debug: print that we're in process_data_key
+    push rdi
+    push rsi
+    lea rdi, [dbg_data_key]
+    call print_string
+    lea rdi, [key_buffer]
+    call print_string
+    lea rdi, [dbg_newline]
+    call print_string
+    pop rsi
+    pop rdi
     
     lea rdi, [key_buffer]
     
@@ -910,6 +961,20 @@ process_data_key:
     call str_equals_nocase
     test eax, eax
     jnz .set_test_file
+    
+    ; Check train_label_file
+    lea rdi, [key_buffer]
+    lea rsi, [key_train_label_file]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_train_label_file
+    
+    ; Check test_label_file
+    lea rdi, [key_buffer]
+    lea rsi, [key_test_label_file]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_test_label_file
     
     ; Check val_split
     lea rdi, [key_buffer]
@@ -969,6 +1034,40 @@ process_data_key:
     call str_copy
     jmp .data_key_done
     
+.set_train_label_file:
+    lea rdi, [value_buffer]
+    call str_length
+    mov ebx, eax
+    inc ebx
+    mov edi, ebx
+    call mem_alloc
+    
+    test rax, rax
+    jz .data_key_done
+    
+    mov [r13 + OFF_TRAIN_LABEL_FILE], rax
+    mov rdi, rax
+    lea rsi, [value_buffer]
+    call str_copy
+    jmp .data_key_done
+    
+.set_test_label_file:
+    lea rdi, [value_buffer]
+    call str_length
+    mov ebx, eax
+    inc ebx
+    mov edi, ebx
+    call mem_alloc
+    
+    test rax, rax
+    jz .data_key_done
+    
+    mov [r13 + OFF_TEST_LABEL_FILE], rax
+    mov rdi, rax
+    lea rsi, [value_buffer]
+    call str_copy
+    jmp .data_key_done
+    
 .set_val_split:
     lea rdi, [value_buffer]
     call parse_float
@@ -988,6 +1087,7 @@ process_data_key:
     jmp .data_key_done
     
 .data_key_done:
+    pop r13
     pop rbx
     pop rbp
     ret

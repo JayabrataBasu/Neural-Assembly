@@ -55,9 +55,11 @@ dataset_load:
     xor rax, rax
     ret
 
-; dataset_shuffle -> dataset_shuffle_indices
+; dataset_shuffle - No-op (shuffling not implemented)
+; The real dataset_shuffle_indices requires an index array which we don't have
 dataset_shuffle:
-    jmp dataset_shuffle_indices
+    xor eax, eax
+    ret
 
 ; mem_init - no-op initializer for memory subsystem
 mem_init:
