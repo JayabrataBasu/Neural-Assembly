@@ -206,16 +206,6 @@ dataset_load_csv:
     
     mov [rsp+40], r12               ; n_samples
     
-    ; Debug: print n_samples
-    push r12
-    lea rdi, [rel dbg_samples]
-    call print_string
-    mov rdi, r12
-    call print_int
-    lea rdi, [rel dbg_nl]
-    call print_string
-    pop r12
-    
     ; Allocate dataset
     mov rdi, DATASET_SIZE
     call mem_alloc
@@ -229,16 +219,6 @@ dataset_load_csv:
     mov [r13 + DATASET_N_FEATURES], rax
     mov eax, [rsp+24]
     mov [r13 + DATASET_DTYPE], eax
-    
-    ; Debug: print n_features
-    push rax
-    lea rdi, [rel dbg_features]
-    call print_string
-    mov rdi, [rsp+24]               ; n_features (need to recalculate offset due to push)
-    call print_int
-    lea rdi, [rel dbg_nl]
-    call print_string
-    pop rax
     
     ; Create data tensor
     mov rax, [rsp+40]

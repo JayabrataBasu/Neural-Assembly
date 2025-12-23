@@ -402,14 +402,6 @@ config_parse:
     ; Save buffer position - rsi will be clobbered by section comparisons
     push rsi
     
-    ; Debug: print parsed section
-    lea rdi, [dbg_section]
-    call print_string
-    lea rdi, [section_buffer]
-    call print_string
-    lea rdi, [dbg_newline]
-    call print_string
-    
     ; Identify section
     lea rdi, [section_buffer]
     call str_to_lower
@@ -935,18 +927,6 @@ process_data_key:
     ; Get r13 from caller (it's a callee-saved register, so should still be config pointer)
     ; But save our copy to be safe
     
-    ; Debug: print that we're in process_data_key
-    push rdi
-    push rsi
-    lea rdi, [dbg_data_key]
-    call print_string
-    lea rdi, [key_buffer]
-    call print_string
-    lea rdi, [dbg_newline]
-    call print_string
-    pop rsi
-    pop rdi
-    
     lea rdi, [key_buffer]
     
     ; Check train_file
@@ -1035,16 +1015,6 @@ process_data_key:
     jmp .data_key_done
     
 .set_train_label_file:
-    ; Debug
-    push rdi
-    lea rdi, [rel dbg_data_key]
-    call print_string
-    lea rdi, [rel key_train_label_file]
-    call print_string
-    lea rdi, [rel dbg_newline]
-    call print_string
-    pop rdi
-
     lea rdi, [value_buffer]
     call str_length
     mov ebx, eax
