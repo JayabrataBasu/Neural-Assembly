@@ -39,6 +39,13 @@ section .data
     dbg_samples:        db "[DBG] n_samples = ", 0
     dbg_features:       db "[DBG] n_features = ", 0
     dbg_nl:             db 10, 0
+    dbg_label_path:     db "[DBG] Label path: ", 0
+    dbg_line_content:   db "[DBG] Line content: ", 0
+    dbg_float_val:      db "[DBG] Float val: ", 0
+    dbg_dtype:          db "[DBG] dtype: ", 0
+    dbg_storing_f32:    db "[DBG] Storing f32", 0
+    dbg_labels_tensor_val: db "[DBG] Labels tensor[0]: ", 0
+    dbg_batch_y_val:    db "[DBG] Batch Y[0]: ", 0
 
 section .bss
     align 8
@@ -69,6 +76,7 @@ extern str_to_float
 extern str_to_int
 extern print_string
 extern print_int
+extern print_float
 
 ; Export dataset functions
 global dataset_create
@@ -93,7 +101,7 @@ dataset_create:
     push r12
     push r13
     push r14
-    sub rsp, 24
+    sub rsp, 32
     
     mov r12, rdi                    ; n_samples
     mov r13, rsi                    ; n_features
@@ -126,7 +134,7 @@ dataset_create:
     
     mov rax, rbx
     
-    add rsp, 24
+    add rsp, 32
     pop r14
     pop r13
     pop r12
@@ -136,7 +144,7 @@ dataset_create:
 
 .alloc_failed:
     xor eax, eax
-    add rsp, 24
+    add rsp, 32
     pop r14
     pop r13
     pop r12
@@ -162,7 +170,7 @@ dataset_load_csv:
     push r13
     push r14
     push r15
-    sub rsp, 88
+    sub rsp, 88                     ; Align stack (5 pushes = 40 bytes, need 8 more + 80 = 128 bytes aligned)
     
     mov [rsp], rdi                  ; data_path
     mov [rsp+8], rsi                ; label_path
@@ -348,11 +356,21 @@ dataset_load_csv:
     test rax, rax
     jz .no_labels
     
+    ; Debug: print label path
+    push rax
+    lea rdi, [rel dbg_label_path]
+    call print_string
+    mov rdi, [rsp]
+    call print_string
+    lea rdi, [rel dbg_nl]
+    call print_string
+    pop rax
+
     mov rdi, rax
     lea rsi, [rel mode_read]
     call fopen wrt ..plt
     test rax, rax
-    jz .no_labels
+    jz .labels_open_failed
     mov [rsp+32], rax
     
     mov rbx, [r15 + TENSOR_DATA]
@@ -396,6 +414,21 @@ dataset_load_csv:
 .done_labels:
     mov rdi, [rsp+32]
     call fclose wrt ..plt
+    
+    ; Debug: print first label from tensor
+    mov rbx, [r15 + TENSOR_DATA]
+    movss xmm0, [rbx]
+    cvttss2si rdi, xmm0
+    
+    push rbx
+    push rdi
+    lea rdi, [rel dbg_labels_tensor_val]
+    call print_string
+    pop rdi
+    call print_int
+    lea rdi, [rel dbg_nl]
+    call print_string
+    pop rbx
 
 .no_labels:
     mov rax, r13
@@ -408,6 +441,13 @@ dataset_load_csv:
     pop rbx
     pop rbp
     ret
+
+.labels_open_failed:
+    lea rdi, [rel err_file_open]
+    call print_string
+    lea rdi, [rel dbg_nl]
+    call print_string
+    jmp .no_labels
 
 .file_error:
     lea rdi, [rel err_file_open]
@@ -629,6 +669,23 @@ dataset_get_batch:
     mov rax, [rsp+8]                ; out_y
     mov rcx, [rsp+48]
     mov [rax], rcx
+    
+    ; Debug: print first batch_y value
+    mov rax, [rsp+48]           ; batch_y tensor
+    mov rax, [rax + TENSOR_DATA]
+    movss xmm0, [rax]
+    cvttss2si rdi, xmm0
+    
+    push rax
+    push rdi
+    lea rdi, [rel dbg_batch_y_val]
+    call print_string
+    pop rdi
+    call print_int
+    lea rdi, [rel dbg_nl]
+    call print_string
+    pop rax
+    
     jmp .done
 
 .no_batch_labels:

@@ -1035,6 +1035,16 @@ process_data_key:
     jmp .data_key_done
     
 .set_train_label_file:
+    ; Debug
+    push rdi
+    lea rdi, [rel dbg_data_key]
+    call print_string
+    lea rdi, [rel key_train_label_file]
+    call print_string
+    lea rdi, [rel dbg_newline]
+    call print_string
+    pop rdi
+
     lea rdi, [value_buffer]
     call str_length
     mov ebx, eax

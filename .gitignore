@@ -1,1 +1,10 @@
-claude.md
+Claude.md
+*.o
+neural_framework
+model.bin
+csv/*.csv
+example_config.ini
+*.md
+__pycache__/
+.DS_Store
+*.swp

@@ -78,9 +78,7 @@ mem_free:
     jz .done
     
     ; Call free(ptr)
-    sub rsp, 8              ; Align stack
     call free wrt ..plt
-    add rsp, 8
     
 .done:
     pop rbp
@@ -99,7 +97,7 @@ mem_alloc_aligned:
     mov rbp, rsp
     push rbx
     push r12
-    sub rsp, 24             ; Space for local variable + alignment
+    sub rsp, 16             ; Space for local variable + alignment
     
     ; Save parameters
     mov rbx, rdi            ; size
@@ -118,7 +116,7 @@ mem_alloc_aligned:
     ; Get the allocated pointer
     mov rax, [rsp]
     
-    add rsp, 24
+    add rsp, 16
     pop r12
     pop rbx
     pop rbp
@@ -126,7 +124,7 @@ mem_alloc_aligned:
 
 .aligned_alloc_failed:
     xor eax, eax            ; Return NULL
-    add rsp, 24
+    add rsp, 16
     pop r12
     pop rbx
     pop rbp

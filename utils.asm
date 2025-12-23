@@ -281,14 +281,14 @@ str_to_int:
 str_to_float:
     push rbp
     mov rbp, rsp
-    sub rsp, 16
+    sub rsp, 8              ; Align stack to 16 bytes
     
     ; strtod(str, NULL)
     xor esi, esi            ; endptr = NULL
     call strtod wrt ..plt
     ; Result in XMM0
     
-    add rsp, 16
+    add rsp, 8
     pop rbp
     ret
 

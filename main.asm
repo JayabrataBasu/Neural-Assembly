@@ -47,6 +47,7 @@ section .data
     msg_epoch:      db "Epoch ", 0
     msg_loss:       db " | Loss: ", 0
     msg_acc:        db " | Accuracy: ", 0
+    msg_target:     db " | Target: ", 0
     msg_percent:    db "%", 10, 0
     msg_done:       db "[+] Training completed!", 10, 0
     msg_saving:     db "[*] Saving model...", 10, 0
@@ -87,6 +88,8 @@ section .data
     softmax_out_msg: db "[DEBUG] Softmax out: ", 0
     acc_loss_msg:   db "[DEBUG] Acc loss: ", 0
     num_batches_msg: db "[DEBUG] Num batches: ", 0
+    dbg_acc_target_float: db "[DBG] Acc target float: ", 0
+    dbg_acc_target_int: db "[DBG] Acc target int: ", 0
     
     ; Float format strings
     float_format:   db "%.4f", 0
@@ -1153,7 +1156,7 @@ load_test_data:
 
     ; Call dataset_load_csv(data_path, label_path, n_features=input_size, dtype=DT_FLOAT32)
     mov rsi, [r12 + 92]         ; test_label_file pointer (OFF_TEST_LABEL_FILE = 92)
-    mov rdx, [r12]              ; input_size
+    mov edx, [r12]              ; input_size (32-bit zero extended to rdx)
     xor rcx, rcx                ; dtype = DT_FLOAT32
     call dataset_load_csv
     jmp .test_load_done
@@ -1378,6 +1381,20 @@ train_epoch:
     mov rdi, rbx                ; predictions node
     mov rsi, [rbp - 72]         ; batch_y tensor (labels)
     call cross_entropy_loss
+    
+    push rax                    ; save loss node
+    
+    ; Calculate accuracy
+    mov rcx, [rbx]              ; predictions node -> value (tensor)
+    mov rdi, rcx                ; logits tensor
+    mov rsi, [rbp - 72]         ; batch_y tensor
+    call calculate_batch_accuracy
+    
+    add [correct_count], eax
+    mov eax, [rbp - 48]         ; batch_size
+    add [total_count], eax
+    
+    pop rax                     ; restore loss node
     
     ; Debug
     push rax
@@ -1720,6 +1737,149 @@ optimizer_step:
     pop rbp
     ret
 
+; calculate_batch_accuracy - Calculate accuracy for a batch
+; Arguments:
+;   rdi - logits tensor (batch_size x num_classes)
+;   rsi - targets tensor (batch_size) - float values representing class indices
+; Returns:
+;   eax - number of correct predictions
+calculate_batch_accuracy:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    
+    mov r12, rdi                ; logits
+    mov r13, rsi                ; targets
+    
+    ; Get batch size
+    mov rax, [r12 + 16]         ; shape
+    mov ecx, [rax]              ; batch_size
+    mov r14d, ecx
+    
+    ; Get num_classes
+    mov edx, [rax + 8]          ; num_classes
+    mov r15d, edx
+    
+    xor ebx, ebx                ; correct_count = 0
+    xor r8d, r8d                ; i = 0
+    
+    mov r9, [r12]               ; logits data
+    mov r10, [r13]              ; targets data
+    
+.acc_loop:
+    cmp r8d, r14d
+    jge .acc_done
+    
+    ; Find argmax for sample i
+    ; logits[i] starts at r9 + i * num_classes * 4 (assuming float32)
+    mov eax, r8d
+    imul eax, r15d
+    shl eax, 2                  ; * 4 bytes
+    lea rdi, [r9 + rax]         ; pointer to logits for this sample
+    
+    ; Find max index in this row
+    xor ecx, ecx                ; max_idx = 0
+    movss xmm0, [rdi]           ; max_val
+    mov edx, 1                  ; j = 1
+    
+.max_loop:
+    cmp edx, r15d
+    jge .max_found
+    
+    movss xmm1, [rdi + rdx*4]
+    comiss xmm1, xmm0
+    jbe .next_col
+    
+    movaps xmm0, xmm1
+    mov ecx, edx
+    
+.next_col:
+    inc edx
+    jmp .max_loop
+    
+.max_found:
+    ; ecx is predicted class
+    
+    ; Get target class
+    ; targets[i] is at r10 + i * 4
+    movss xmm2, [r10 + r8*4]
+    cvttss2si eax, xmm2         ; convert float target to int
+    
+    ; Debug: print pred/target for first sample
+    test r8d, r8d
+    jnz .check_match
+    
+    push rax
+    push rcx
+    push rdx
+    push rdi
+    push rsi
+    
+    lea rdi, [msg_result]
+    call print_string
+    mov rdi, rcx
+    call print_int
+    lea rdi, [msg_target]
+    call print_string
+    mov rdi, rax
+    call print_int
+    
+    ; Debug: print float target
+    push rax
+    push rcx
+    push rdx
+    
+    movss xmm2, [r10 + r8*4]
+    cvtss2sd xmm0, xmm2
+    
+    sub rsp, 16
+    movsd [rsp], xmm0
+    lea rdi, [rel dbg_acc_target_float]
+    call print_string
+    movsd xmm0, [rsp]
+    call print_float
+    add rsp, 16
+    lea rdi, [rel newline]
+    call print_string
+    
+    pop rdx
+    pop rcx
+    pop rax
+    
+    lea rdi, [newline]
+    call print_string
+    
+    pop rsi
+    pop rdi
+    pop rdx
+    pop rcx
+    pop rax
+
+.check_match:
+    cmp ecx, eax
+    jne .next_sample
+    
+    inc ebx                     ; correct!
+    
+.next_sample:
+    inc r8d
+    jmp .acc_loop
+    
+.acc_done:
+    mov eax, ebx
+    
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
 ; run_inference - Run inference on dataset
 ; Arguments:
 ;   rdi - model pointer
@@ -1731,7 +1891,11 @@ run_inference:
     push rbx
     push r12
     push r13
-    sub rsp, 24
+    push r14
+    push r15
+    sub rsp, 56                 ; Align stack to 16 bytes (5 pushes = 40 bytes, need 8 more for 16-byte alignment + 48 bytes local = 88? No)
+                                ; rbp aligned. 5 pushes -> rsp ends in 8. sub 56 -> rsp ends in 0.
+                                ; [rbp-48]=out_x, [rbp-56]=out_y, [rbp-60]=correct, [rbp-64]=total, [rbp-68]=sample
     
     mov r12, rdi                ; model
     mov r13, rsi                ; dataset
@@ -1740,45 +1904,108 @@ run_inference:
     test r13, r13
     jz .infer_done
     
-    ; Iterate through dataset
-    mov ecx, [r13]              ; num_samples
-    mov [rbp - 32], ecx
-    mov dword [rbp - 36], 0     ; current sample
+    mov dword [rbp - 60], 0     ; correct_count = 0
+    mov dword [rbp - 64], 0     ; total_count = 0
+    mov dword [rbp - 68], 0     ; current sample index
     
 .infer_loop:
-    mov eax, [rbp - 36]
-    cmp eax, [rbp - 32]
-    jge .infer_done
+    mov eax, [rbp - 68]
+    cmp eax, [r13]              ; num_samples
+    jge .infer_summary
     
     ; Get sample
+    lea rdi, [msg_batch_got]
+    call print_string
+
     mov rdi, r13
-    mov esi, [rbp - 36]
+    mov esi, [rbp - 68]
     mov edx, 1                  ; batch size 1
+    lea rcx, [rbp - 48]         ; &out_x
+    lea r8, [rbp - 56]          ; &out_y
     call dataset_get_batch
+    
+    lea rdi, [msg_node_ok]
+    call print_string
+
+    ; Create input node
+    mov rdi, [rbp - 48]         ; out_x tensor
+    mov rsi, 0                  ; requires_grad = false
+    call node_create
+    mov r14, rax                ; input node
     
     ; Forward pass
     mov rdi, r12
-    mov rsi, rax
+    mov rsi, r14
     call model_forward
+    mov r15, rax                ; output node
     
-    ; Print result
+    lea rdi, [msg_forward_ok]
+    call print_string
+
+    ; Print result prefix
     lea rdi, [msg_result]
     call print_string
     
     ; Find argmax of output
-    mov rdi, rax
+    mov rdi, r15                ; output node
+    mov rdi, [rdi]              ; output tensor
     call tensor_argmax
+    mov rbx, rax                ; prediction
+    
     mov rdi, rax
     call print_int
     
+    ; Check accuracy if label exists
+    mov rax, [rbp - 56]         ; out_y tensor
+    test rax, rax
+    jz .print_newline
+    
+    ; Print " | Target: "
+    lea rdi, [msg_target]
+    call print_string
+    
+    mov rax, [rbp - 56]
+    movss xmm0, [rax]           ; target value (float)
+    cvttss2si eax, xmm0         ; target int
+    
+    mov rdi, rax
+    call print_int
+    
+    cmp eax, ebx
+    jne .print_newline
+    
+    inc dword [rbp - 60]        ; correct++
+    
+.print_newline:
     lea rdi, [msg_newline]
     call print_string
     
-    inc dword [rbp - 36]
+    inc dword [rbp - 64]        ; total++
+    inc dword [rbp - 68]        ; sample++
     jmp .infer_loop
     
+.infer_summary:
+    ; Print accuracy
+    lea rdi, [msg_acc]
+    call print_string
+    
+    cvtsi2ss xmm0, dword [rbp - 60]
+    cvtsi2ss xmm1, dword [rbp - 64]
+    divss xmm0, xmm1
+    mov eax, 100
+    cvtsi2ss xmm1, eax
+    mulss xmm0, xmm1
+    
+    mov edi, 2
+    call print_float
+    
+    lea rdi, [msg_percent]
+    call print_string
+    
 .infer_done:
-    add rsp, 24
+    add rsp, 56
+    pop r15
+    pop r14
     pop r13
     pop r12
     pop rbx
