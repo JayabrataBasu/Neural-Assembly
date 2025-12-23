@@ -90,6 +90,11 @@ section .data
     num_batches_msg: db "[DEBUG] Num batches: ", 0
     dbg_acc_target_float: db "[DBG] Acc target float: ", 0
     dbg_acc_target_int: db "[DBG] Acc target int: ", 0
+    dbg_first_label: db "[DBG] First label in tensor: ", 0
+    dbg_labels_null: db "[DBG] Labels tensor is NULL!", 10, 0
+    dbg_labels_data_null: db "[DBG] Labels tensor data is NULL!", 10, 0
+    dbg_match_msg: db "[DBG] Match found!", 10, 0
+    dbg_correct_count: db "[DBG] Batch correct count: ", 0
     
     ; Float format strings
     float_format:   db "%.4f", 0
@@ -1125,6 +1130,38 @@ load_training_data:
 .dataset_ok:
     lea rdi, [msg_dataset_ok]
     call print_string
+    
+    ; Debug: print first label - be careful with stack alignment
+    mov rax, [r13 + 16]         ; DATASET_LABELS (tensor*)
+    test rax, rax
+    jz .labels_null
+    mov rbx, [rax]              ; tensor->data (use callee-saved rbx)
+    test rbx, rbx
+    jz .labels_data_null
+    
+    ; Print first label as float
+    lea rdi, [rel dbg_first_label]
+    call print_string
+    
+    movss xmm0, [rbx]           ; load first label
+    cvtss2sd xmm0, xmm0
+    mov eax, 1                  ; 1 float arg in xmm
+    call print_float
+    
+    lea rdi, [newline]
+    call print_string
+    jmp .labels_done
+    
+.labels_null:
+    lea rdi, [rel dbg_labels_null]
+    call print_string
+    jmp .labels_done
+    
+.labels_data_null:
+    lea rdi, [rel dbg_labels_data_null]
+    call print_string
+    
+.labels_done:
     mov rax, r13                ; restore dataset pointer
     jmp .load_done
     
@@ -1190,18 +1227,6 @@ train_epoch:
     mov r14, rdx                ; dataset
     mov r15, rcx                ; config
     
-    ; Debug: print entry
-    push r12
-    push r13
-    push r14
-    push r15
-    lea rdi, [msg_epoch_entry]
-    call print_string
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    
     ; Stack layout:
     ; [rbp - 48] = batch_size
     ; [rbp - 52] = num_batches
@@ -1214,16 +1239,6 @@ train_epoch:
     mov eax, [r15 + 28]         ; batch_size
     mov [rbp - 48], eax
     
-    ; Debug
-    push rax
-    push r14
-    push r15
-    lea rdi, [msg_batch_size]
-    call print_string
-    pop r15
-    pop r14
-    pop rax
-    
     ; Initialize accumulated loss to 0.0
     xorps xmm0, xmm0
     movss [rbp - 80], xmm0
@@ -1231,14 +1246,6 @@ train_epoch:
     ; Get number of batches (dataset_size / batch_size)
     test r14, r14
     jz .epoch_done
-    
-    ; Debug - dataset is not null
-    push r14
-    push r15
-    lea rdi, [msg_dataset_notnull]
-    call print_string
-    pop r15
-    pop r14
     
     mov eax, [r14]              ; num_samples
     xor edx, edx
@@ -1267,47 +1274,11 @@ train_epoch:
     lea rcx, [rbp - 64]             ; &out_x
     lea r8, [rbp - 72]              ; &out_y
     call dataset_get_batch
-    
+
     ; Create input node from batch_x tensor
     mov rdi, [rbp - 64]         ; batch_x tensor
     test rdi, rdi
     jz .next_batch              ; skip if NULL
-    
-    ; Debug: print first input value
-    push rdi
-    mov rcx, [rdi]              ; tensor->data
-    test rcx, rcx
-    jz .skip_input_debug
-    lea rdi, [rel input_msg]
-    call print_string
-    pop rdi
-    push rdi
-    mov rcx, [rdi]
-    movss xmm0, [rcx]
-    cvtss2sd xmm0, xmm0
-    call print_float
-    lea rdi, [rel newline]
-    call print_string
-    jmp .done_input_debug
-.skip_input_debug:
-    pop rdi
-    push rdi
-.done_input_debug:
-    pop rdi
-    
-    ; Debug
-    push rdi
-    push r12
-    push r13
-    push r14
-    push r15
-    lea rdi, [msg_batch_got]
-    call print_string
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    pop rdi
     
     mov rsi, 0                  ; requires_grad = false for input
     call node_create
@@ -1315,63 +1286,10 @@ train_epoch:
     jz .next_batch
     mov rbx, rax                ; input node
     
-    ; Debug
-    push rbx
-    push r12
-    push r13
-    push r14
-    push r15
-    lea rdi, [msg_node_ok]
-    call print_string
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    pop rbx
-    
     ; Forward pass through model
     mov rdi, r12                ; model
     mov rsi, rbx                ; input node
     call model_forward
-    
-    ; Debug: check first logit value
-    push rax
-    test rax, rax
-    jz .skip_logit_debug
-    mov rcx, [rax]              ; node->value (tensor)
-    test rcx, rcx
-    jz .skip_logit_debug
-    mov rcx, [rcx]              ; tensor->data
-    test rcx, rcx
-    jz .skip_logit_debug
-    
-    ; Print first logit
-    push rcx
-    lea rdi, [rel logit_msg]
-    call print_string
-    pop rcx
-    movss xmm0, [rcx]
-    cvtss2sd xmm0, xmm0
-    call print_float
-    lea rdi, [rel newline]
-    call print_string
-    
-.skip_logit_debug:
-    pop rax
-    
-    ; Debug
-    push rax
-    push r12
-    push r13
-    push r14
-    push r15
-    lea rdi, [msg_forward_ok]
-    call print_string
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    pop rax
     
     test rax, rax
     jz .next_batch
@@ -1396,20 +1314,6 @@ train_epoch:
     
     pop rax                     ; restore loss node
     
-    ; Debug
-    push rax
-    push r12
-    push r13
-    push r14
-    push r15
-    lea rdi, [msg_loss_ok]
-    call print_string
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    pop rax
-    
     test rax, rax
     jz .next_batch
     
@@ -1426,41 +1330,12 @@ train_epoch:
     jz .do_backward
     movss xmm0, [rcx]           ; load loss value (float32)
     
-    ; Debug: print this batch's loss
-    push rcx
-    push rax
-    sub rsp, 8
-    movss [rsp], xmm0
-    lea rdi, [rel loss_val_msg]
-    call print_string
-    movss xmm0, [rsp]
-    cvtss2sd xmm0, xmm0
-    call print_float
-    lea rdi, [rel newline]
-    call print_string
-    add rsp, 8
-    pop rax
-    pop rcx
-    
-    movss xmm0, [rcx]           ; reload loss
     addss xmm0, [rbp - 80]      ; accumulate
     movss [rbp - 80], xmm0
     
 .do_backward:
     ; Set loss gradient to 1.0 for backward pass
     ; TODO: loss node's gradient should be initialized
-    
-    ; Debug
-    push r12
-    push r13
-    push r14
-    push r15
-    lea rdi, [msg_backward_start]
-    call print_string
-    pop r15
-    pop r14
-    pop r13
-    pop r12
     
     ; Backward pass - pass loss node, not model!
     mov rdi, [rbp - 88]         ; loss node
@@ -1482,25 +1357,6 @@ train_epoch:
     jmp .batch_loop
     
 .epoch_done:
-    ; Debug: print accumulated loss and num_batches
-    movss xmm0, [rbp - 80]
-    sub rsp, 8
-    movss [rsp], xmm0
-    lea rdi, [rel acc_loss_msg]
-    call print_string
-    movss xmm0, [rsp]
-    cvtss2sd xmm0, xmm0
-    call print_float
-    lea rdi, [rel newline]
-    call print_string
-    lea rdi, [rel num_batches_msg]
-    call print_string
-    mov edi, [rbp - 52]
-    call print_int
-    lea rdi, [rel newline]
-    call print_string
-    add rsp, 8
-    
     ; Store accumulated loss to global total_loss
     movss xmm0, [rbp - 80]
     
@@ -1512,19 +1368,6 @@ train_epoch:
     divss xmm0, xmm1
     
 .store_loss:
-    ; Debug: print what we're storing
-    sub rsp, 8
-    movss [rsp], xmm0
-    lea rdi, [rel acc_loss_msg]  ; reuse message
-    call print_string
-    movss xmm0, [rsp]
-    cvtss2sd xmm0, xmm0
-    call print_float
-    lea rdi, [rel newline]
-    call print_string
-    movss xmm0, [rsp]
-    add rsp, 8
-    
     movss [total_loss], xmm0
     
     add rsp, 96
@@ -1808,56 +1651,6 @@ calculate_batch_accuracy:
     ; targets[i] is at r10 + i * 4
     movss xmm2, [r10 + r8*4]
     cvttss2si eax, xmm2         ; convert float target to int
-    
-    ; Debug: print pred/target for first sample
-    test r8d, r8d
-    jnz .check_match
-    
-    push rax
-    push rcx
-    push rdx
-    push rdi
-    push rsi
-    
-    lea rdi, [msg_result]
-    call print_string
-    mov rdi, rcx
-    call print_int
-    lea rdi, [msg_target]
-    call print_string
-    mov rdi, rax
-    call print_int
-    
-    ; Debug: print float target
-    push rax
-    push rcx
-    push rdx
-    
-    movss xmm2, [r10 + r8*4]
-    cvtss2sd xmm0, xmm2
-    
-    sub rsp, 16
-    movsd [rsp], xmm0
-    lea rdi, [rel dbg_acc_target_float]
-    call print_string
-    movsd xmm0, [rsp]
-    call print_float
-    add rsp, 16
-    lea rdi, [rel newline]
-    call print_string
-    
-    pop rdx
-    pop rcx
-    pop rax
-    
-    lea rdi, [newline]
-    call print_string
-    
-    pop rsi
-    pop rdi
-    pop rdx
-    pop rcx
-    pop rax
 
 .check_match:
     cmp ecx, eax
@@ -1865,11 +1658,41 @@ calculate_batch_accuracy:
     
     inc ebx                     ; correct!
     
+    ; Debug: print when we get a match
+    push rax
+    push rcx
+    push rbx
+    push r8
+    push r9
+    push r10
+    sub rsp, 8
+    lea rdi, [rel dbg_match_msg]
+    call print_string
+    add rsp, 8
+    pop r10
+    pop r9
+    pop r8
+    pop rbx
+    pop rcx
+    pop rax
+    
 .next_sample:
     inc r8d
     jmp .acc_loop
     
 .acc_done:
+    ; Debug: print final correct count
+    push rbx
+    sub rsp, 8
+    lea rdi, [rel dbg_correct_count]
+    call print_string
+    mov rdi, rbx
+    call print_int
+    lea rdi, [newline]
+    call print_string
+    add rsp, 8
+    pop rbx
+    
     mov eax, ebx
     
     pop r15

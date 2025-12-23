@@ -356,16 +356,6 @@ dataset_load_csv:
     test rax, rax
     jz .no_labels
     
-    ; Debug: print label path
-    push rax
-    lea rdi, [rel dbg_label_path]
-    call print_string
-    mov rdi, [rsp]
-    call print_string
-    lea rdi, [rel dbg_nl]
-    call print_string
-    pop rax
-
     mov rdi, rax
     lea rsi, [rel mode_read]
     call fopen wrt ..plt
@@ -414,21 +404,6 @@ dataset_load_csv:
 .done_labels:
     mov rdi, [rsp+32]
     call fclose wrt ..plt
-    
-    ; Debug: print first label from tensor
-    mov rbx, [r15 + TENSOR_DATA]
-    movss xmm0, [rbx]
-    cvttss2si rdi, xmm0
-    
-    push rbx
-    push rdi
-    lea rdi, [rel dbg_labels_tensor_val]
-    call print_string
-    pop rdi
-    call print_int
-    lea rdi, [rel dbg_nl]
-    call print_string
-    pop rbx
 
 .no_labels:
     mov rax, r13
@@ -562,8 +537,8 @@ dataset_get_batch:
     mov [rsp+48], rax               ; batch_x tensor
     
     ; Copy data
-    mov rdi, [rax + TENSOR_DATA]    ; dst
-    mov rax, [rbx + TENSOR_DATA]    ; src base
+    mov rdi, [rax + TENSOR_DATA]    ; dst = batch_x->data
+    mov rax, [rbx + TENSOR_DATA]    ; src base = data_tensor->data
     
     ; Calculate source offset
     mov rcx, r15                    ; start_idx
@@ -575,39 +550,26 @@ dataset_get_batch:
     
     ; float64
     shl rcx, 3                      ; * 8
-    add rax, rcx                    ; src
+    add rax, rcx                    ; src = data + start_idx * n_features * 8
     mov rsi, rax
     
     mov rcx, r14
-    imul rcx, [rsp+16]              ; total elements
+    imul rcx, [rsp+16]              ; total elements = batch_size * n_features
     shl rcx, 3                      ; * 8 bytes
-    mov rdx, rcx
-    
-    ; Use rep movsb
-    push rdi
-    mov rdi, [rsp+56]               ; batch_x data (adjusted for push)
-    mov rdi, [rdi + TENSOR_DATA]
-    mov rcx, rdx
+    ; rdi already has destination
     rep movsb
-    pop rdi
     jmp .copy_y
 
 .copy_x_f32:
     shl rcx, 2                      ; * 4
-    add rax, rcx
+    add rax, rcx                    ; src = data + start_idx * n_features * 4
     mov rsi, rax
     
     mov rcx, r14
-    imul rcx, [rsp+16]
-    shl rcx, 2
-    mov rdx, rcx
-    
-    push rdi
-    mov rdi, [rsp+56]
-    mov rdi, [rdi + TENSOR_DATA]
-    mov rcx, rdx
+    imul rcx, [rsp+16]              ; total elements = batch_size * n_features
+    shl rcx, 2                      ; * 4 bytes
+    ; rdi already has destination
     rep movsb
-    pop rdi
 
 .copy_y:
     ; Store batch_x
@@ -641,51 +603,26 @@ dataset_get_batch:
     
     shl rcx, 3
     add rax, rcx
-    mov rsi, rax
+    mov rsi, rax                    ; source = labels_data + start_idx * 8
     mov rcx, r14
-    shl rcx, 3
-    
-    push rdi
-    mov rdi, [rsp+56]
-    mov rdi, [rdi + TENSOR_DATA]
+    shl rcx, 3                      ; byte count = batch_size * 8
+    ; rdi already has destination (batch_y->data)
     rep movsb
-    pop rdi
     jmp .store_y
 
 .copy_y_f32:
     shl rcx, 2
     add rax, rcx
-    mov rsi, rax
+    mov rsi, rax                    ; source = labels_data + start_idx * 4
     mov rcx, r14
-    shl rcx, 2
-    
-    push rdi
-    mov rdi, [rsp+56]
-    mov rdi, [rdi + TENSOR_DATA]
+    shl rcx, 2                      ; byte count = batch_size * 4
+    ; rdi already has destination (batch_y->data from line above)
     rep movsb
-    pop rdi
 
 .store_y:
     mov rax, [rsp+8]                ; out_y
     mov rcx, [rsp+48]
     mov [rax], rcx
-    
-    ; Debug: print first batch_y value
-    mov rax, [rsp+48]           ; batch_y tensor
-    mov rax, [rax + TENSOR_DATA]
-    movss xmm0, [rax]
-    cvttss2si rdi, xmm0
-    
-    push rax
-    push rdi
-    lea rdi, [rel dbg_batch_y_val]
-    call print_string
-    pop rdi
-    call print_int
-    lea rdi, [rel dbg_nl]
-    call print_string
-    pop rax
-    
     jmp .done
 
 .no_batch_labels:
