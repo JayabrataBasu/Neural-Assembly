@@ -77,6 +77,7 @@ extern str_to_int
 extern print_string
 extern print_int
 extern print_float
+extern rand_range
 
 ; Export dataset functions
 global dataset_create
@@ -648,11 +649,182 @@ dataset_shuffle_indices:
     jmp .init_loop
 
 .shuffle:
-    ; Fisher-Yates shuffle (simple version using time as seed)
-    ; For now, just leave as sequential (shuffling requires rand)
-    ; TODO: Implement proper shuffling with random
+    ; Fisher-Yates shuffle: for i = n-1 down to 1, swap arr[i] with arr[rand(0..i)]
+    mov r12, rbx                    ; i = n_samples
+    dec r12                         ; i = n_samples - 1
+
+.shuffle_loop:
+    cmp r12, 0
+    jle .shuffle_done
     
+    ; Get random index j in [0, i]
+    lea rdi, [r12 + 1]              ; rdi = i + 1 (exclusive upper bound)
+    call rand_range                 ; rax = random in [0, i]
+    
+    ; Swap arr[i] and arr[j]
+    mov rcx, [r13 + r12*8]          ; rcx = arr[i]
+    mov rdx, [r13 + rax*8]          ; rdx = arr[j]
+    mov [r13 + r12*8], rdx          ; arr[i] = arr[j]
+    mov [r13 + rax*8], rcx          ; arr[j] = arr[i]
+    
+    dec r12
+    jmp .shuffle_loop
+
+.shuffle_done:
     add rsp, 8
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; dataset_shuffle - Shuffle dataset in-place using Fisher-Yates
+; Arguments:
+;   RDI = Dataset* dataset
+; Returns:
+;   RAX = 0 on success
+; =============================================================================
+global dataset_shuffle
+dataset_shuffle:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 72                     ; Local storage + temp row buffers
+    
+    mov r12, rdi                    ; dataset
+    
+    ; Get dataset info
+    mov rbx, [r12 + DATASET_N_SAMPLES]
+    test rbx, rbx
+    jz .shuffle_success             ; Nothing to shuffle
+    cmp rbx, 1
+    je .shuffle_success             ; 1 sample = already shuffled
+    
+    mov r13, [r12 + DATASET_N_FEATURES]
+    mov r14, [r12 + DATASET_DATA]   ; data tensor
+    mov r15, [r12 + DATASET_LABELS] ; labels tensor
+    
+    ; Get row size in bytes (n_features * 4 for float32)
+    mov rax, r13
+    shl rax, 2                      ; * 4 (float32)
+    mov [rsp], rax                  ; row_size
+    
+    ; Allocate temp buffer for swapping rows
+    mov rdi, rax
+    call mem_alloc
+    test rax, rax
+    jz .shuffle_fail
+    mov [rsp+8], rax                ; temp_row buffer
+    
+    ; Get data pointers
+    mov rax, [r14 + TENSOR_DATA]
+    mov [rsp+16], rax               ; data_ptr
+    
+    test r15, r15
+    jz .no_labels_ptr
+    mov rax, [r15 + TENSOR_DATA]
+    jmp .store_labels_ptr
+.no_labels_ptr:
+    xor rax, rax
+.store_labels_ptr:
+    mov [rsp+24], rax               ; labels_ptr
+    
+    ; Fisher-Yates shuffle
+    mov rcx, rbx
+    dec rcx                         ; i = n_samples - 1
+    mov [rsp+32], rcx
+    
+.shuffle_data_loop:
+    mov rcx, [rsp+32]
+    cmp rcx, 0
+    jle .shuffle_cleanup
+    
+    ; Get random index j in [0, i]
+    lea rdi, [rcx + 1]
+    call rand_range                 ; rax = j
+    mov [rsp+40], rax               ; save j
+    
+    mov rcx, [rsp+32]               ; reload i
+    cmp rax, rcx
+    je .next_iter                   ; i == j, no swap needed
+    
+    ; Swap data rows: row_i <-> row_j
+    mov rdi, [rsp]                  ; row_size
+    mov rsi, [rsp+16]               ; data_ptr
+    
+    ; Calculate row_i address = data_ptr + i * row_size
+    mov rax, rcx
+    imul rax, rdi
+    add rax, rsi
+    mov [rsp+48], rax               ; row_i_ptr
+    
+    ; Calculate row_j address = data_ptr + j * row_size
+    mov rax, [rsp+40]
+    imul rax, rdi
+    add rax, rsi
+    mov [rsp+56], rax               ; row_j_ptr
+    
+    ; Copy row_i to temp
+    mov rdi, [rsp+8]                ; temp
+    mov rsi, [rsp+48]               ; row_i
+    mov rcx, [rsp]
+    rep movsb
+    
+    ; Copy row_j to row_i
+    mov rdi, [rsp+48]               ; row_i
+    mov rsi, [rsp+56]               ; row_j
+    mov rcx, [rsp]
+    rep movsb
+    
+    ; Copy temp to row_j
+    mov rdi, [rsp+56]               ; row_j
+    mov rsi, [rsp+8]                ; temp
+    mov rcx, [rsp]
+    rep movsb
+    
+    ; Swap labels if present
+    mov rax, [rsp+24]               ; labels_ptr
+    test rax, rax
+    jz .next_iter
+    
+    mov rcx, [rsp+32]               ; i
+    mov rdx, [rsp+40]               ; j
+    
+    ; Swap labels[i] and labels[j] (4 bytes each for float32)
+    mov rsi, rax
+    lea rdi, [rsi + rcx*4]          ; &labels[i]
+    lea rsi, [rax + rdx*4]          ; &labels[j]
+    
+    mov eax, [rdi]
+    mov ecx, [rsi]
+    mov [rdi], ecx
+    mov [rsi], eax
+    
+.next_iter:
+    dec qword [rsp+32]
+    jmp .shuffle_data_loop
+    
+.shuffle_cleanup:
+    ; Free temp buffer
+    mov rdi, [rsp+8]
+    call mem_free
+    
+.shuffle_success:
+    xor eax, eax
+    jmp .shuffle_exit
+    
+.shuffle_fail:
+    mov eax, -1
+    
+.shuffle_exit:
+    add rsp, 72
+    pop r15
+    pop r14
     pop r13
     pop r12
     pop rbx
