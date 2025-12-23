@@ -41,6 +41,7 @@ section .data
     msg_done:       db "[+] Training completed!", 10, 0
     msg_saving:     db "[*] Saving model...", 10, 0
     msg_saved:      db "[+] Model saved to: ", 0
+    msg_val:        db " | Val Acc: ", 0
     msg_loading_m:  db "[*] Loading model...", 10, 0
     msg_loaded:     db "[+] Model loaded successfully", 10, 0
     msg_inferring:  db "[*] Running inference...", 10, 0
@@ -77,6 +78,7 @@ section .bss
     model_ptr:      resq 1
     optimizer_ptr:  resq 1
     dataset_ptr:    resq 1
+    test_dataset_ptr: resq 1
     
     ; Number formatting buffer
     num_buffer:     resb 32
@@ -174,6 +176,7 @@ section .text
     extern xorshift_seed
     extern get_time_ns
     extern str_equals_nocase
+    extern putchar
 
 ; ============================================================================
 ; PROGRAM ENTRY POINT
@@ -382,10 +385,19 @@ cmd_train_handler:
     test rax, rax
     jz .train_config_error
     
-    ; Load dataset
+    ; Load training dataset
     mov rdi, r14
     call load_training_data
     mov [dataset_ptr], rax
+    
+    ; Check if training data loaded
+    test rax, rax
+    jz .train_no_data
+    
+    ; Load test/validation dataset (optional - no error if missing)
+    mov rdi, r14
+    call load_test_data
+    mov [test_dataset_ptr], rax
     
     ; Record start time
     lea rdi, [start_time]
@@ -463,7 +475,46 @@ cmd_train_handler:
     mov edi, 2
     call print_float
     
+    ; Print % without newline
+    push r14
+    mov rdi, 37                 ; '%' character
+    call putchar wrt ..plt
+    pop r14
+    
+    ; Calculate validation accuracy if test dataset exists
+    mov rax, [test_dataset_ptr]
+    test rax, rax
+    jz .skip_val_accuracy
+    
+    lea rdi, [msg_val]
+    call print_string
+    
+    ; Calculate validation accuracy
+    mov rdi, [model_ptr]
+    mov rsi, [test_dataset_ptr]
+    call evaluate_model
+    
+    ; rax = correct, rdx = total
+    test rdx, rdx
+    jz .skip_val_accuracy
+    
+    cvtsi2ss xmm0, eax          ; correct
+    cvtsi2ss xmm1, edx          ; total
+    divss xmm0, xmm1
+    mov eax, 100
+    cvtsi2ss xmm1, eax
+    mulss xmm0, xmm1
+    
+    cvtss2sd xmm0, xmm0
+    mov edi, 2
+    call print_float
+    
     lea rdi, [msg_percent]
+    call print_string
+    jmp .next_epoch
+
+.skip_val_accuracy:
+    lea rdi, [msg_newline]
     call print_string
     jmp .next_epoch
     
@@ -513,6 +564,12 @@ cmd_train_handler:
     xor eax, eax
     jmp .train_cleanup
     
+.train_no_data:
+    lea rdi, [msg_error]
+    call print_string
+    mov eax, -1
+    jmp .train_cleanup
+
 .train_config_error:
     lea rdi, [msg_error]
     call print_string
@@ -640,6 +697,7 @@ print_config_summary:
 ;   rdi - config pointer
 ; Returns:
 ;   rax - model pointer
+; Builds: Input -> [Linear -> ReLU] x num_layers -> Linear -> Softmax
 build_model:
     push rbp
     mov rbp, rsp
@@ -647,67 +705,91 @@ build_model:
     push r12
     push r13
     push r14
-    sub rsp, 32
+    push r15
+    sub rsp, 56
     
     mov r12, rdi                ; config
     
     ; Get model parameters from config
     mov eax, [r12]              ; input_size (offset 0)
-    mov r13d, eax
+    mov [rbp - 48], eax         ; save input_size
     mov eax, [r12 + 4]          ; hidden_size
-    mov r14d, eax
+    mov [rbp - 52], eax         ; save hidden_size
     mov eax, [r12 + 8]          ; output_size
-    mov ebx, eax
+    mov [rbp - 56], eax         ; save output_size
+    mov eax, [r12 + 12]         ; num_layers (number of hidden layers)
+    mov [rbp - 60], eax         ; save num_layers
     
-    ; Allocate model structure
-    ; Simple model: array of layer pointers
-    ; offset 0: num_layers
-    ; offset 8: layer pointers array
-    mov edi, 128                ; generous size
+    ; Calculate total components: num_layers * 2 (Linear + ReLU each) + 2 (output Linear + Softmax)
+    mov ecx, eax
+    shl ecx, 1                  ; num_layers * 2
+    add ecx, 2                  ; + output layer + softmax
+    mov [rbp - 64], ecx         ; total_components
+    
+    ; Allocate model structure (8 bytes per layer + 8 for count)
+    lea edi, [ecx * 8 + 16]     ; size
     call mem_alloc
     
     test rax, rax
     jz .build_error
     
-    mov [rbp - 40], rax         ; model pointer
+    mov r13, rax                ; model pointer
+    mov eax, [rbp - 64]
+    mov [r13], eax              ; store num_layers
     
-    ; For now, build a simple 2-layer MLP:
-    ; Input -> Linear -> ReLU -> Linear -> Output
+    ; Layer pointer offset
+    lea r14, [r13 + 8]          ; current layer slot
     
-    mov dword [rax], 4          ; 4 components
+    ; Track current input size
+    mov r15d, [rbp - 48]        ; current_in = input_size
     
-    ; Create first linear layer
-    mov edi, r13d               ; in_features
-    mov esi, r14d               ; out_features
-    xor edx, edx                ; dtype = DT_FLOAT32 (0)
+    ; Build hidden layers
+    mov ebx, [rbp - 60]         ; loop counter = num_layers
+    test ebx, ebx
+    jz .build_output            ; skip if no hidden layers
+
+.build_hidden_loop:
+    ; Create Linear layer: current_in -> hidden_size
+    mov edi, r15d               ; in_features
+    mov esi, [rbp - 52]         ; out_features = hidden_size
+    xor edx, edx                ; dtype = DT_FLOAT32
     call linear_create
     
-    mov rbx, [rbp - 40]
-    mov [rbx + 8], rax          ; layer 0: Linear
+    mov [r14], rax              ; store Linear layer
+    add r14, 8
     
-    ; ReLU is stateless, just store marker
-    mov qword [rbx + 16], 1     ; layer 1: ReLU marker
+    ; Add ReLU marker
+    mov qword [r14], 1          ; ReLU marker
+    add r14, 8
     
-    ; Create second linear layer
-    mov edi, r14d               ; in_features (hidden)
-    mov esi, [r12 + 8]          ; out_features
-    xor edx, edx                ; dtype = DT_FLOAT32 (0)
+    ; Update current input size for next layer
+    mov r15d, [rbp - 52]        ; current_in = hidden_size
+    
+    dec ebx
+    jnz .build_hidden_loop
+    
+.build_output:
+    ; Create output Linear layer: hidden_size -> output_size
+    mov edi, r15d               ; in_features (hidden_size or input_size if no hidden)
+    mov esi, [rbp - 56]         ; out_features = output_size
+    xor edx, edx                ; dtype = DT_FLOAT32
     call linear_create
     
-    mov rbx, [rbp - 40]
-    mov [rbx + 24], rax         ; layer 2: Linear
+    mov [r14], rax              ; store output Linear
+    add r14, 8
     
-    ; Softmax marker
-    mov qword [rbx + 32], 2     ; layer 3: Softmax marker
+    ; Add Softmax marker
+    mov qword [r14], 2          ; Softmax marker
     
-    mov rax, [rbp - 40]
+    mov rax, r13                ; return model pointer
     jmp .build_done
     
 .build_error:
     xor eax, eax
     
 .build_done:
-    add rsp, 32
+    add rsp, 56
+    pop r15
     pop r14
     pop r13
     pop r12
@@ -1091,10 +1173,8 @@ train_epoch:
     
     ; Get next batch - pass output pointers for X and Y
     mov rdi, r14                    ; dataset
-    mov rsi, [rbp - 56]             ; batch_index (zero-extend)
-    movzx esi, si
-    mov rdx, [rbp - 48]             ; batch_size (zero-extend)
-    movzx edx, dx
+    mov esi, [rbp - 56]             ; batch_index (32-bit)
+    mov edx, [rbp - 48]             ; batch_size (32-bit)
     lea rcx, [rbp - 64]             ; &out_x
     lea r8, [rbp - 72]              ; &out_y
     call dataset_get_batch
@@ -1399,6 +1479,112 @@ calculate_batch_accuracy:
 .acc_done:
     mov eax, ebx
     
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; evaluate_model - Evaluate model on dataset without printing
+; Arguments:
+;   rdi - model pointer
+;   rsi - dataset pointer
+; Returns:
+;   rax - correct count
+;   rdx - total count
+evaluate_model:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 72
+    
+    mov r12, rdi                ; model
+    mov r13, rsi                ; dataset
+    
+    test r13, r13
+    jz .eval_no_data
+    
+    mov dword [rbp - 60], 0     ; correct_count = 0
+    mov dword [rbp - 64], 0     ; total_count = 0
+    mov dword [rbp - 68], 0     ; current sample index
+    
+    ; Get batch size (use 32 for efficiency)
+    mov dword [rbp - 72], 32
+    
+.eval_loop:
+    mov eax, [rbp - 68]
+    cmp eax, [r13]              ; num_samples
+    jge .eval_done
+    
+    ; Calculate batch size (min of 32 and remaining samples)
+    mov ecx, [r13]
+    sub ecx, eax                ; remaining = num_samples - current
+    cmp ecx, 32
+    jle .use_remaining
+    mov ecx, 32
+.use_remaining:
+    mov [rbp - 72], ecx         ; actual batch size
+    
+    ; Get batch
+    mov rdi, r13
+    mov esi, [rbp - 68]
+    mov edx, [rbp - 72]
+    lea rcx, [rbp - 48]         ; &out_x
+    lea r8, [rbp - 56]          ; &out_y
+    call dataset_get_batch
+    
+    ; Check if batch was created successfully
+    mov rdi, [rbp - 48]         ; batch_x tensor
+    test rdi, rdi
+    jz .eval_done               ; Skip if batch creation failed
+    
+    ; Create input node
+    xor esi, esi                ; requires_grad = false
+    call node_create
+    test rax, rax
+    jz .eval_done               ; Skip if node creation failed
+    mov r14, rax                ; input node
+    
+    ; Forward pass
+    mov rdi, r12
+    mov rsi, r14
+    call model_forward
+    test rax, rax
+    jz .eval_done               ; Skip if forward failed
+    mov r15, rax                ; output node
+    
+    ; Calculate batch accuracy
+    mov rdi, r15                ; output node
+    mov rdi, [rdi]              ; output tensor (logits)
+    mov rsi, [rbp - 56]         ; labels tensor
+    call calculate_batch_accuracy
+    
+    add [rbp - 60], eax         ; correct_count += batch_correct
+    mov eax, [rbp - 72]
+    add [rbp - 64], eax         ; total_count += batch_size
+    
+    ; Advance to next batch
+    mov eax, [rbp - 72]
+    add [rbp - 68], eax
+    jmp .eval_loop
+    
+.eval_done:
+    mov eax, [rbp - 60]         ; return correct in rax
+    mov edx, [rbp - 64]         ; return total in rdx
+    jmp .eval_exit
+    
+.eval_no_data:
+    xor eax, eax
+    xor edx, edx
+    
+.eval_exit:
+    add rsp, 72
     pop r15
     pop r14
     pop r13

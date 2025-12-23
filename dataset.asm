@@ -517,6 +517,10 @@ dataset_get_batch:
     call tensor_create
     mov [rsp+48], rax               ; batch_x tensor
     
+    ; Check if tensor creation succeeded
+    test rax, rax
+    jz .batch_alloc_failed
+    
     ; Copy data
     mov rdi, [rax + TENSOR_DATA]    ; dst = batch_x->data
     mov rax, [rbx + TENSOR_DATA]    ; src base = data_tensor->data
@@ -619,6 +623,14 @@ dataset_get_batch:
     pop rbx
     pop rbp
     ret
+
+.batch_alloc_failed:
+    ; Set output pointers to NULL and return
+    mov rax, [rsp]                  ; out_x
+    mov qword [rax], 0
+    mov rax, [rsp+8]                ; out_y  
+    mov qword [rax], 0
+    jmp .done
 
 ; =============================================================================
 ; dataset_shuffle_indices - Create shuffled index array

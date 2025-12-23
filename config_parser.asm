@@ -173,8 +173,8 @@ OFF_TRAIN_LABEL_FILE    equ 84
 OFF_TEST_LABEL_FILE     equ 92
 OFF_VAL_SPLIT           equ 100
 OFF_SHUFFLE             equ 104
-OFF_NORMALIZE           equ 92
-OFF_HIDDEN_SIZES        equ 96
+OFF_NORMALIZE           equ 108
+OFF_HIDDEN_SIZES        equ 112
 
 ; Activation enum
 ACT_RELU                equ 0
