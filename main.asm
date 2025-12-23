@@ -95,6 +95,8 @@ section .data
     dbg_labels_data_null: db "[DBG] Labels tensor data is NULL!", 10, 0
     dbg_match_msg: db "[DBG] Match found!", 10, 0
     dbg_correct_count: db "[DBG] Batch correct count: ", 0
+    dbg_total_correct: db "[DBG] Total correct: ", 0
+    dbg_out_of: db " / ", 0
     
     ; Float format strings
     float_format:   db "%.4f", 0
@@ -529,6 +531,7 @@ cmd_train_handler:
     cvtsi2ss xmm1, eax
     mulss xmm0, xmm1
     
+    cvtss2sd xmm0, xmm0         ; convert float32 to float64 for printf
     mov edi, 2
     call print_float
     
@@ -1130,38 +1133,6 @@ load_training_data:
 .dataset_ok:
     lea rdi, [msg_dataset_ok]
     call print_string
-    
-    ; Debug: print first label - be careful with stack alignment
-    mov rax, [r13 + 16]         ; DATASET_LABELS (tensor*)
-    test rax, rax
-    jz .labels_null
-    mov rbx, [rax]              ; tensor->data (use callee-saved rbx)
-    test rbx, rbx
-    jz .labels_data_null
-    
-    ; Print first label as float
-    lea rdi, [rel dbg_first_label]
-    call print_string
-    
-    movss xmm0, [rbx]           ; load first label
-    cvtss2sd xmm0, xmm0
-    mov eax, 1                  ; 1 float arg in xmm
-    call print_float
-    
-    lea rdi, [newline]
-    call print_string
-    jmp .labels_done
-    
-.labels_null:
-    lea rdi, [rel dbg_labels_null]
-    call print_string
-    jmp .labels_done
-    
-.labels_data_null:
-    lea rdi, [rel dbg_labels_data_null]
-    call print_string
-    
-.labels_done:
     mov rax, r13                ; restore dataset pointer
     jmp .load_done
     
@@ -1658,41 +1629,11 @@ calculate_batch_accuracy:
     
     inc ebx                     ; correct!
     
-    ; Debug: print when we get a match
-    push rax
-    push rcx
-    push rbx
-    push r8
-    push r9
-    push r10
-    sub rsp, 8
-    lea rdi, [rel dbg_match_msg]
-    call print_string
-    add rsp, 8
-    pop r10
-    pop r9
-    pop r8
-    pop rbx
-    pop rcx
-    pop rax
-    
 .next_sample:
     inc r8d
     jmp .acc_loop
     
 .acc_done:
-    ; Debug: print final correct count
-    push rbx
-    sub rsp, 8
-    lea rdi, [rel dbg_correct_count]
-    call print_string
-    mov rdi, rbx
-    call print_int
-    lea rdi, [newline]
-    call print_string
-    add rsp, 8
-    pop rbx
-    
     mov eax, ebx
     
     pop r15
