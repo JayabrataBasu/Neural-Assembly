@@ -53,6 +53,7 @@ section .data
     
     ; Default output filename
     default_model:  db "model.bin", 0
+    opt_file_name:  db "optimizer.bin", 0
     
     ; Test messages
     msg_test_header: db 10, "=== Running Framework Tests ===", 10, 0
@@ -152,6 +153,9 @@ section .text
     extern sgd_step
     extern adam_create
     extern adam_step
+    extern optimizer_set_lr
+    extern optimizer_get_lr
+    extern optimizer_save_state
     
     ; Dataset
     extern dataset_load
@@ -421,6 +425,36 @@ cmd_train_handler:
     cmp eax, [rbp - 80]
     ja .train_done
     
+    ; StepLR scheduler: if step_size>0 and epoch % step_size == 0 then lr *= gamma
+    push rax
+    push rcx
+    push rdx
+    mov rcx, r14                ; config
+    mov eax, [rcx + 144]        ; OFF_LR_STEP_SIZE
+    test eax, eax
+    jz .skip_lr_sched
+    mov edx, [current_epoch]
+    mov ecx, eax                ; step_size
+    xor edx, edx
+    mov eax, [current_epoch]
+    div ecx                     ; EAX/ECX, remainder in EDX
+    test edx, edx
+    jne .skip_lr_sched
+    
+    ; Apply decay
+    mov rdi, [optimizer_ptr]
+    call optimizer_get_lr
+    movss xmm1, [r14 + 148]     ; OFF_LR_GAMMA (float32)
+    cvtss2sd xmm1, xmm1
+    mulsd xmm0, xmm1
+    mov rdi, [optimizer_ptr]
+    call optimizer_set_lr
+
+.skip_lr_sched:
+    pop rdx
+    pop rcx
+    pop rax
+    
     ; Print epoch number
     lea rdi, [msg_epoch]
     call print_string
@@ -553,6 +587,14 @@ cmd_train_handler:
     call print_string
     lea rdi, [msg_newline]
     call print_string
+    
+    ; Save optimizer state alongside model
+    mov rdi, [optimizer_ptr]
+    test rdi, rdi
+    jz .skip_opt_save
+    lea rsi, [opt_file_name]
+    call optimizer_save_state
+.skip_opt_save:
     
     ; Record end time and print duration
     lea rdi, [end_time]

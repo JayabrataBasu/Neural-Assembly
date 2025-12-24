@@ -85,6 +85,10 @@ global adam_create
 global adam_step
 global adam_zero_grad
 global optimizer_free
+global optimizer_set_lr
+global optimizer_get_lr
+global optimizer_save_state
+global optimizer_load_state
 
 ; =============================================================================
 ; sgd_create - Create SGD optimizer
@@ -872,6 +876,471 @@ optimizer_free:
 
 .done:
     add rsp, 8
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; optimizer_set_lr - Update optimizer learning rate in-place
+; Arguments:
+;   RDI = Optimizer* opt
+;   XMM0 = new lr (double)
+; =============================================================================
+optimizer_set_lr:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    
+    test rdi, rdi
+    jz .done
+    mov rbx, [rdi + OPT_STATE]
+    test rbx, rbx
+    jz .done
+    
+    movsd [rbx], xmm0          ; both SGD/Adam have lr at offset 0
+
+.done:
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; optimizer_get_lr - Read optimizer learning rate
+; Arguments:
+;   RDI = Optimizer* opt
+; Returns:
+;   XMM0 = lr (double)
+; =============================================================================
+optimizer_get_lr:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    
+    vxorpd xmm0, xmm0, xmm0
+    test rdi, rdi
+    jz .out
+    mov rbx, [rdi + OPT_STATE]
+    test rbx, rbx
+    jz .out
+    movsd xmm0, [rbx]
+
+.out:
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; optimizer_save_state - Save optimizer hypers and moment tensors to a file
+; Arguments:
+;   RDI = Optimizer* opt
+;   RSI = const char* filename
+; Returns:
+;   RAX = 0 on success, -1 on error
+; Format (binary):
+;   [n_params 4B][type 4B][state bytes...][per-param tensor data...]
+; SGD state: lr(8), momentum(8), velocities data (if any)
+; Adam state: lr(8), beta1(8), beta2(8), eps(8), t(8), m then v tensor data
+; =============================================================================
+optimizer_save_state:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 56
+    
+    mov r12, rdi                ; opt
+    mov r13, rsi                ; filename
+    
+    test r12, r12
+    jz .save_err
+    
+    ; Open file for write, truncate
+    mov rax, 2                  ; sys_open
+    mov rdi, r13
+    mov rsi, 0x241              ; O_WRONLY | O_CREAT | O_TRUNC
+    mov rdx, 0644o
+    syscall
+    test rax, rax
+    js .save_err
+    mov r14, rax                ; fd
+    
+    ; Write n_params (4 bytes)
+    lea rdi, [rbp - 48]
+    mov eax, [r12 + OPT_N_PARAMS]
+    mov [rdi], eax
+    mov r15d, eax               ; save n_params
+    
+    ; Determine optimizer type by comparing step_fn pointer
+    ; sgd_step vs adam_step
+    lea rax, [rel sgd_step]
+    cmp [r12 + OPT_STEP_FN], rax
+    jne .save_type_adam
+    mov dword [rdi + 4], 0      ; type = 0 (SGD)
+    jmp .save_header
+.save_type_adam:
+    mov dword [rdi + 4], 1      ; type = 1 (Adam)
+    
+.save_header:
+    ; Write header (8 bytes)
+    mov rax, 1
+    mov rdi, r14
+    lea rsi, [rbp - 48]
+    mov rdx, 8
+    syscall
+    test rax, rax
+    js .save_close_err
+    
+    mov rbx, [r12 + OPT_STATE]
+    test rbx, rbx
+    jz .save_close_ok           ; nothing more to write
+    
+    ; Get type again
+    lea rax, [rel sgd_step]
+    cmp [r12 + OPT_STEP_FN], rax
+    jne .save_adam_state
+    
+    ; Save SGD state (lr, momentum, velocities data)
+    ; Write lr(8) + momentum(8)
+    mov rax, 1
+    mov rdi, r14
+    mov rsi, rbx                ; state: lr, momentum at 0,8
+    mov rdx, 16
+    syscall
+    test rax, rax
+    js .save_close_err
+    
+    ; If momentum != 0 write velocity tensor data
+    movsd xmm0, [rbx + 8]
+    xorpd xmm1, xmm1
+    ucomisd xmm0, xmm1
+    je .save_close_ok           ; no momentum
+    
+    ; velocities array at rbx+16
+    mov rax, [rbx + 16]
+    test rax, rax
+    jz .save_close_ok
+    mov r13, rax                ; velocities array
+    xor ecx, ecx
+.save_sgd_vel_loop:
+    cmp ecx, r15d
+    jge .save_close_ok
+    push rcx
+    
+    mov rax, [r13 + rcx*8]
+    test rax, rax
+    jz .save_sgd_vel_next
+    ; Get tensor data size
+    push rax
+    mov rdi, rax
+    call tensor_data_size
+    mov rdx, rax                ; bytes
+    pop rax
+    mov rsi, [rax]              ; TENSOR_DATA
+    mov rax, 1
+    mov rdi, r14
+    syscall
+    test rax, rax
+    js .save_sgd_vel_fail
+    
+.save_sgd_vel_next:
+    pop rcx
+    inc ecx
+    jmp .save_sgd_vel_loop
+.save_sgd_vel_fail:
+    pop rcx
+    jmp .save_close_err
+    
+.save_adam_state:
+    ; Write lr, beta1, beta2, eps, t (40 bytes)
+    mov rax, 1
+    mov rdi, r14
+    mov rsi, rbx
+    mov rdx, 40
+    syscall
+    test rax, rax
+    js .save_close_err
+    
+    ; Write m tensors then v tensors
+    mov rax, [rbx + 40]         ; m array
+    mov [rbp - 56], rax
+    mov rax, [rbx + 48]         ; v array
+    mov [rbp - 64], rax
+    
+    ; m tensors
+    mov r13, [rbp - 56]
+    test r13, r13
+    jz .save_adam_v
+    xor ecx, ecx
+.save_adam_m_loop:
+    cmp ecx, r15d
+    jge .save_adam_v
+    push rcx
+    mov rax, [r13 + rcx*8]
+    test rax, rax
+    jz .save_adam_m_next
+    push rax
+    mov rdi, rax
+    call tensor_data_size
+    mov rdx, rax
+    pop rax
+    mov rsi, [rax]
+    mov rax, 1
+    mov rdi, r14
+    syscall
+    test rax, rax
+    js .save_adam_m_fail
+.save_adam_m_next:
+    pop rcx
+    inc ecx
+    jmp .save_adam_m_loop
+.save_adam_m_fail:
+    pop rcx
+    jmp .save_close_err
+    
+.save_adam_v:
+    mov r13, [rbp - 64]
+    test r13, r13
+    jz .save_close_ok
+    xor ecx, ecx
+.save_adam_v_loop:
+    cmp ecx, r15d
+    jge .save_close_ok
+    push rcx
+    mov rax, [r13 + rcx*8]
+    test rax, rax
+    jz .save_adam_v_next
+    push rax
+    mov rdi, rax
+    call tensor_data_size
+    mov rdx, rax
+    pop rax
+    mov rsi, [rax]
+    mov rax, 1
+    mov rdi, r14
+    syscall
+    test rax, rax
+    js .save_adam_v_fail
+.save_adam_v_next:
+    pop rcx
+    inc ecx
+    jmp .save_adam_v_loop
+.save_adam_v_fail:
+    pop rcx
+    jmp .save_close_err
+    
+.save_close_ok:
+    mov rax, 3
+    mov rdi, r14
+    syscall
+    xor eax, eax
+    jmp .save_done
+    
+.save_close_err:
+    mov rax, 3
+    mov rdi, r14
+    syscall
+.save_err:
+    mov eax, -1
+    
+.save_done:
+    add rsp, 56
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; optimizer_load_state - Load optimizer state from file
+; Arguments:
+;   RDI = Optimizer* opt (already created, same n_params/type)
+;   RSI = const char* filename
+; Returns:
+;   RAX = 0 on success, -1 on error
+; =============================================================================
+optimizer_load_state:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 56
+    
+    mov r12, rdi                ; opt
+    mov r13, rsi                ; filename
+    
+    test r12, r12
+    jz .load_err
+    
+    ; Open file for read
+    mov rax, 2
+    mov rdi, r13
+    xor esi, esi                ; O_RDONLY
+    xor edx, edx
+    syscall
+    test rax, rax
+    js .load_err
+    mov r14, rax                ; fd
+    
+    ; Read header (8 bytes): n_params, type
+    lea rsi, [rbp - 48]
+    mov rax, 0
+    mov rdi, r14
+    mov rdx, 8
+    syscall
+    cmp rax, 8
+    jne .load_close_err
+    
+    mov r15d, [rbp - 48]        ; n_params
+    
+    ; Validate n_params matches
+    cmp r15d, [r12 + OPT_N_PARAMS]
+    jne .load_close_err
+    
+    mov rbx, [r12 + OPT_STATE]
+    test rbx, rbx
+    jz .load_close_ok
+    
+    ; Check type
+    mov eax, [rbp - 44]
+    cmp eax, 1
+    je .load_adam_state
+    
+    ; Load SGD state
+    mov rax, 0
+    mov rdi, r14
+    mov rsi, rbx
+    mov rdx, 16                 ; lr + momentum
+    syscall
+    cmp rax, 16
+    jne .load_close_err
+    
+    ; Read velocities if any
+    movsd xmm0, [rbx + 8]
+    xorpd xmm1, xmm1
+    ucomisd xmm0, xmm1
+    je .load_close_ok
+    
+    mov rax, [rbx + 16]
+    test rax, rax
+    jz .load_close_ok
+    mov r13, rax
+    xor ecx, ecx
+.load_sgd_vel_loop:
+    cmp ecx, r15d
+    jge .load_close_ok
+    push rcx
+    mov rax, [r13 + rcx*8]
+    test rax, rax
+    jz .load_sgd_vel_next
+    push rax
+    mov rdi, rax
+    call tensor_data_size
+    mov rdx, rax
+    pop rax
+    mov rsi, [rax]
+    mov rax, 0
+    mov rdi, r14
+    syscall
+.load_sgd_vel_next:
+    pop rcx
+    inc ecx
+    jmp .load_sgd_vel_loop
+    
+.load_adam_state:
+    ; Read lr,beta1,beta2,eps,t
+    mov rax, 0
+    mov rdi, r14
+    mov rsi, rbx
+    mov rdx, 40
+    syscall
+    cmp rax, 40
+    jne .load_close_err
+    
+    ; Read m tensors
+    mov rax, [rbx + 40]
+    mov [rbp - 56], rax
+    mov rax, [rbx + 48]
+    mov [rbp - 64], rax
+    
+    mov r13, [rbp - 56]
+    test r13, r13
+    jz .load_adam_v
+    xor ecx, ecx
+.load_adam_m_loop:
+    cmp ecx, r15d
+    jge .load_adam_v
+    push rcx
+    mov rax, [r13 + rcx*8]
+    test rax, rax
+    jz .load_adam_m_next
+    push rax
+    mov rdi, rax
+    call tensor_data_size
+    mov rdx, rax
+    pop rax
+    mov rsi, [rax]
+    mov rax, 0
+    mov rdi, r14
+    syscall
+.load_adam_m_next:
+    pop rcx
+    inc ecx
+    jmp .load_adam_m_loop
+    
+.load_adam_v:
+    mov r13, [rbp - 64]
+    test r13, r13
+    jz .load_close_ok
+    xor ecx, ecx
+.load_adam_v_loop:
+    cmp ecx, r15d
+    jge .load_close_ok
+    push rcx
+    mov rax, [r13 + rcx*8]
+    test rax, rax
+    jz .load_adam_v_next
+    push rax
+    mov rdi, rax
+    call tensor_data_size
+    mov rdx, rax
+    pop rax
+    mov rsi, [rax]
+    mov rax, 0
+    mov rdi, r14
+    syscall
+.load_adam_v_next:
+    pop rcx
+    inc ecx
+    jmp .load_adam_v_loop
+    
+.load_close_ok:
+    mov rax, 3
+    mov rdi, r14
+    syscall
+    xor eax, eax
+    jmp .load_done
+    
+.load_close_err:
+    mov rax, 3
+    mov rdi, r14
+    syscall
+.load_err:
+    mov eax, -1
+    
+.load_done:
+    add rsp, 56
+    pop r15
+    pop r14
     pop r13
     pop r12
     pop rbx

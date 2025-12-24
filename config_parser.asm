@@ -35,6 +35,8 @@ section .data
     key_weight_decay:   db "weight_decay", 0
     key_early_stopping: db "early_stopping", 0
     key_patience:       db "patience", 0
+    key_lr_step_size:   db "lr_step_size", 0
+    key_lr_gamma:       db "lr_gamma", 0
     
     ; Key names - Optimizer
     key_optimizer:      db "type", 0
@@ -146,7 +148,9 @@ section .text
 ; 104      4      shuffle (bool)
 ; 108      4      normalize (bool)
 ; 112      4      hidden_sizes array (up to 8 hidden layers)
-; 144      112    reserved
+; 144      4      lr_step_size (int) - StepLR scheduler
+; 148      4      lr_gamma (float) - StepLR decay factor
+; 152      104    reserved
 ; ============================================================================
 
 CONFIG_SIZE             equ 256
@@ -175,6 +179,8 @@ OFF_VAL_SPLIT           equ 100
 OFF_SHUFFLE             equ 104
 OFF_NORMALIZE           equ 108
 OFF_HIDDEN_SIZES        equ 112
+OFF_LR_STEP_SIZE        equ 144
+OFF_LR_GAMMA            equ 148
 
 ; Activation enum
 ACT_RELU                equ 0
@@ -778,6 +784,20 @@ process_training_key:
     test eax, eax
     jnz .set_patience
     
+    ; Check lr_step_size
+    lea rdi, [key_buffer]
+    lea rsi, [key_lr_step_size]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_lr_step_size
+    
+    ; Check lr_gamma
+    lea rdi, [key_buffer]
+    lea rsi, [key_lr_gamma]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_lr_gamma
+    
     jmp .training_key_done
     
 .set_epochs:
@@ -814,6 +834,18 @@ process_training_key:
     lea rdi, [value_buffer]
     call parse_int
     mov [r13 + OFF_PATIENCE], eax
+    jmp .training_key_done
+
+.set_lr_step_size:
+    lea rdi, [value_buffer]
+    call parse_int
+    mov [r13 + OFF_LR_STEP_SIZE], eax
+    jmp .training_key_done
+
+.set_lr_gamma:
+    lea rdi, [value_buffer]
+    call parse_float
+    movss [r13 + OFF_LR_GAMMA], xmm0
     jmp .training_key_done
     
 .training_key_done:

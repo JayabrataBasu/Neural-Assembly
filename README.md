@@ -49,6 +49,8 @@ This project implements a complete neural network training framework in pure x86
 - **Optimizers** (`optimizers.asm`)
   - SGD with momentum
   - Adam
+  - Learning rate scheduler (StepLR)
+  - Optimizer state save/load
 
 - **Data Loading** (`dataset.asm`)
   - CSV file parsing
@@ -58,6 +60,7 @@ This project implements a complete neural network training framework in pure x86
 - **Model I/O** (`model_io.asm`)
   - Binary model serialization
   - Checkpoint save/restore
+  - Optimizer state persistence
 
 - **Configuration** (`config_parser.asm`)
   - INI-style configuration parsing
@@ -119,6 +122,8 @@ activation = relu
 epochs = 100
 batch_size = 32
 learning_rate = 0.001
+lr_step_size = 10       # Decay LR every 10 epochs (0 to disable)
+lr_gamma = 0.5          # Multiply LR by 0.5 at each step
 
 [optimizer]
 type = adam
