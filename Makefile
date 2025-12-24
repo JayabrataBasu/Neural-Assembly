@@ -15,6 +15,8 @@ TARGET = neural_framework
 # Source files (order matters for dependencies)
 SRCS = mem.asm \
        utils.asm \
+       error.asm \
+       simd.asm \
        tensor.asm \
        math_kernels.asm \
        autograd.asm \
@@ -25,6 +27,9 @@ SRCS = mem.asm \
        dataset.asm \
        model_io.asm \
        config_parser.asm \
+       threads.asm \
+       tests.asm \
+       verify.asm \
        compat.asm \
        main.asm
 
@@ -39,7 +44,7 @@ all: $(TARGET)
 
 # Link all object files into final executable using gcc (links libc/libm)
 CC = gcc
-LDFLAGS = -lm -no-pie
+LDFLAGS = -lm -lpthread -no-pie
 
 $(TARGET): $(OBJS)
 	$(CC) -o $@ $^ $(LDFLAGS)
@@ -60,6 +65,14 @@ clean:
 run-test: $(TARGET)
 	./$(TARGET) test
 
+# Run mathematical verification
+verify: $(TARGET)
+	python3 tools/verify_simple.py
+
+# Run full verification (requires numpy)
+verify-full: $(TARGET)
+	python3 tools/verify_correctness.py
+
 # Show help
 help:
 	@echo "Neural Assembly Framework Build System"
@@ -68,7 +81,9 @@ help:
 	@echo "  all      - Build the framework (default)"
 	@echo "  debug    - Build with debug symbols and listings"
 	@echo "  clean    - Remove build artifacts"
-	@echo "  run-test - Build and run gradient tests"
+	@echo "  run-test - Build and run unit tests"
+	@echo "  verify   - Build and run mathematical verification"
+	@echo "  verify-full - Build and run full verification (requires numpy)"
 	@echo "  help     - Show this help message"
 	@echo ""
 	@echo "Usage after building:"

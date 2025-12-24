@@ -18,10 +18,13 @@ This project implements a complete neural network training framework in pure x86
   - Tensor creation, reshaping, and views
   - Automatic stride calculation
 
-- **SIMD-Optimized Math Kernels** (`math_kernels.asm`)
-  - SSE/AVX vectorized operations
+- **SIMD-Optimized Math Kernels** (`math_kernels.asm`, `simd.asm`)
+  - Runtime CPU feature detection (SSE, AVX, AVX-512)
+  - AVX-512 vectorized operations (processes 16 floats/iteration)
+  - AVX2/AVX fallback (8 floats/iteration)
+  - SSE fallback (4 floats/iteration)
   - Blocked matrix multiplication (SGEMM)
-  - SAXPY, dot product, element-wise operations
+  - FMA (Fused Multiply-Add) support
 
 - **Automatic Differentiation** (`autograd.asm`)
   - Tape-based computational graph
@@ -66,6 +69,23 @@ This project implements a complete neural network training framework in pure x86
   - INI-style configuration parsing
   - Training hyperparameters
   - Model architecture specification
+
+- **Error Handling** (`error.asm`)
+  - Comprehensive error codes (19 error types)
+  - User-friendly error messages
+  - Tensor validation (NaN detection, shape checking)
+  - Null pointer checks
+
+- **Testing Framework** (`tests.asm`)
+  - Unit tests for all components
+  - Numerical gradient checking (central differences)
+  - Gradient verification for autograd
+
+- **Multi-threading** (`threads.asm`)
+  - pthreads-based thread pool
+  - Work queue with condition variables
+  - Parallel for loops
+  - Automatic CPU core detection
 
 ## Requirements
 
@@ -178,11 +198,36 @@ The framework follows the System V AMD64 ABI:
 
 ## SIMD Optimization
 
-Matrix operations use SSE/AVX instructions for vectorization:
+Matrix operations use runtime-detected SIMD instructions for vectorization:
 
+- **AVX-512**: 16-wide SIMD processing (512-bit zmm registers)
+- **AVX2/AVX**: 8-wide SIMD processing (256-bit ymm registers)
+- **SSE**: 4-wide SIMD processing (128-bit xmm registers)
 - **SGEMM**: 4x4 blocked multiplication with loop unrolling
-- **Element-wise ops**: 4-wide SIMD processing
+- **FMA**: Fused multiply-add for improved accuracy and speed
 - **Reductions**: Horizontal adds with SSE3 HADDPS
+
+CPU features are detected at runtime:
+```bash
+./neural_framework test  # Shows detected SIMD level
+```
+
+## Example Configurations
+
+Example configurations are provided in the `configs/` directory:
+
+| Config | Description | Architecture |
+|--------|-------------|--------------|
+| `xor_config.ini` | XOR learning | 2→8→1 |
+| `mnist_config.ini` | MNIST digits | 784→256→128→10 |
+| `sine_config.ini` | Sine regression | 1→32→32→1 |
+| `binary_class_config.ini` | Spiral classification | 2→16→16→1 |
+| `deep_network_config.ini` | Deep network | 10→64→64→64→64→10 |
+
+Generate datasets for these examples:
+```bash
+python3 tools/gen_datasets.py
+```
 
 ## Example: XOR Network
 
@@ -220,6 +265,8 @@ Neural Assembly/
 ├── main.asm            # Entry point and CLI
 ├── mem.asm             # Memory management
 ├── utils.asm           # Utility functions
+├── error.asm           # Error handling system
+├── simd.asm            # SIMD detection and optimized kernels
 ├── tensor.asm          # Tensor operations
 ├── math_kernels.asm    # SIMD math operations
 ├── autograd.asm        # Automatic differentiation
@@ -230,8 +277,20 @@ Neural Assembly/
 ├── dataset.asm         # Data loading
 ├── model_io.asm        # Model serialization
 ├── config_parser.asm   # Configuration parsing
+├── threads.asm         # Multi-threading support
+├── tests.asm           # Unit tests and gradient checking
+├── compat.asm          # C library compatibility
 ├── Makefile            # Build system
 ├── example_config.ini  # Example configuration
+├── configs/            # More example configurations
+│   ├── xor_config.ini
+│   ├── mnist_config.ini
+│   ├── sine_config.ini
+│   └── ...
+├── tools/
+│   ├── gen_synth.py    # Synthetic data generator
+│   └── gen_datasets.py # Dataset generator for examples
+├── csv/                # Training data
 └── README.md           # This file
 ```
 
@@ -240,8 +299,6 @@ Neural Assembly/
 - Single-precision (float32) only
 - Maximum 4 tensor dimensions
 - No GPU support (CPU SIMD only)
-- Limited error handling
-- No multi-threading (single-core)
 
 ## Performance Considerations
 
