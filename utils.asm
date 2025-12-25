@@ -354,3 +354,5 @@ print_float:
     add rsp, 16
     pop rbp
     ret
+; Mark stack as non-executable
+section .note.GNU-stack noalloc noexec nowrite progbits

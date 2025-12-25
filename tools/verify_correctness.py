@@ -58,12 +58,12 @@ def test_linear_layer():
     numpy_output = input_data @ weights + bias
     expected = numpy_output.flatten()[0]
 
-    print(".6f")
-    print(".6f")
+    print(f"NumPy output: {expected:.6f}")
+    print(f"Input @ Weights: {(input_data @ weights).flatten()[0]:.6f}")
 
     # For now, we can't directly test the assembly, but we can verify the math
     manual_calc = 1.0*0.1 + 2.0*0.2 + 3.0*0.3 + 4.0*0.4 + 0.5
-    print(".6f")
+    print(f"Manual calculation: {manual_calc:.6f}")
 
     if abs(expected - manual_calc) < 1e-6:
         print("✓ Linear layer math verification: PASS")
@@ -102,18 +102,18 @@ def test_loss_functions():
 
     # MSE
     mse_ref = np.mean((pred - target) ** 2)
-    print(".6f")
+    print(f"MSE reference: {mse_ref:.6f}")
 
     # Binary Cross Entropy
     bce_ref = -np.mean(target * np.log(pred + 1e-8) + (1 - target) * np.log(1 - pred + 1e-8))
-    print(".6f")
+    print(f"BCE reference: {bce_ref:.6f}")
 
     # Cross Entropy (multi-class)
     pred_multi = np.array([[0.1, 0.9], [0.8, 0.2], [0.3, 0.7]], dtype=np.float32)
     target_multi = np.array([1, 0, 1], dtype=np.int32)
 
     ce_ref = -np.mean(np.log(pred_multi[np.arange(len(target_multi)), target_multi] + 1e-8))
-    print(".6f")
+    print(f"CE reference: {ce_ref:.6f}")
 
     print("✓ Loss function references computed")
     return True
@@ -156,9 +156,9 @@ def test_gradient_checking():
     numerical_grad = (simple_function(x + eps) - simple_function(x - eps)) / (2 * eps)
     analytical_grad = analytical_gradient(x)
 
-    print(".6f")
-    print(".6f")
-    print(".6f")
+    print(f"Numerical gradient: {numerical_grad:.6f}")
+    print(f"Analytical gradient: {analytical_grad:.6f}")
+    print(f"Difference: {abs(numerical_grad - analytical_grad):.6f}")
 
     if abs(numerical_grad - analytical_grad) < 1e-4:
         print("✓ Gradient checking math: PASS")
@@ -175,8 +175,8 @@ def test_sine_approximation():
     y = np.sin(x)
 
     print(f"Training points: {len(x)}")
-    print(".3f")
-    print(".3f")
+    print(f"X range: [{x.min():.3f}, {x.max():.3f}]")
+    print(f"Y range: [{y.min():.3f}, {y.max():.3f}]")
 
     # A neural network should be able to approximate this
     print("✓ Sine approximation setup verified")

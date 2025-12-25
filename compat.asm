@@ -143,3 +143,5 @@ rand_range:
     pop rbx
     pop rbp
     ret
+; Mark stack as non-executable
+section .note.GNU-stack noalloc noexec nowrite progbits

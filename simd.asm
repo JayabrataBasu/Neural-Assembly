@@ -782,3 +782,5 @@ simd_sum_f32:
     pop r12
     pop rbp
     ret
+; Mark stack as non-executable
+section .note.GNU-stack noalloc noexec nowrite progbits

@@ -47,9 +47,15 @@ section .data
     
     ; Key names - Data
     key_train_file:     db "train_file", 0
+    key_train_data:     db "train_data", 0
     key_test_file:      db "test_file", 0
+    key_test_data:      db "test_data", 0
+    key_val_data:       db "val_data", 0
     key_train_label_file: db "train_label_file", 0
+    key_train_labels:   db "train_labels", 0
     key_test_label_file:  db "test_label_file", 0
+    key_test_labels:    db "test_labels", 0
+    key_val_labels:     db "val_labels", 0
     key_val_split:      db "val_split", 0
     key_shuffle:        db "shuffle", 0
     key_normalize:      db "normalize", 0
@@ -961,29 +967,59 @@ process_data_key:
     
     lea rdi, [key_buffer]
     
-    ; Check train_file
+    ; Check train_file or train_data
     lea rsi, [key_train_file]
     call str_equals_nocase
     test eax, eax
     jnz .set_train_file
+    lea rdi, [key_buffer]
+    lea rsi, [key_train_data]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_train_file
     
-    ; Check test_file
+    ; Check test_file or test_data or val_data
     lea rdi, [key_buffer]
     lea rsi, [key_test_file]
     call str_equals_nocase
     test eax, eax
     jnz .set_test_file
+    lea rdi, [key_buffer]
+    lea rsi, [key_test_data]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_test_file
+    lea rdi, [key_buffer]
+    lea rsi, [key_val_data]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_test_file
     
-    ; Check train_label_file
+    ; Check train_label_file or train_labels
     lea rdi, [key_buffer]
     lea rsi, [key_train_label_file]
     call str_equals_nocase
     test eax, eax
     jnz .set_train_label_file
+    lea rdi, [key_buffer]
+    lea rsi, [key_train_labels]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_train_label_file
     
-    ; Check test_label_file
+    ; Check test_label_file or test_labels or val_labels
     lea rdi, [key_buffer]
     lea rsi, [key_test_label_file]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_test_label_file
+    lea rdi, [key_buffer]
+    lea rsi, [key_test_labels]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_test_label_file
+    lea rdi, [key_buffer]
+    lea rsi, [key_val_labels]
     call str_equals_nocase
     test eax, eax
     jnz .set_test_label_file
@@ -1562,3 +1598,5 @@ print_error_msg:
     pop rbx
     pop rbp
     ret
+; Mark stack as non-executable
+section .note.GNU-stack noalloc noexec nowrite progbits

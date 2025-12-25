@@ -8,3 +8,43 @@ example_config.ini
 __pycache__/
 .DS_Store
 *.swp
+
+# Virtual environment
+venv/
+
+# Python cache and temporary files
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git
+.mypy_cache
+.pytest_cache
+.hypothesis
+
+# IDE files
+.vscode/
+.idea/
+*.tmp
+*~
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+#Standalone files
+verify_correctness.py
+test_input.csv
+xor_model.bin

@@ -54,4 +54,5 @@ debug_tensor_values:
 ; =============================================================================
 debug_gradient_flow:
     ; Simplified placeholder - just return
-    ret
+    ret; Mark stack as non-executable
+section .note.GNU-stack noalloc noexec nowrite progbits

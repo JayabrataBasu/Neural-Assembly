@@ -848,3 +848,5 @@ cross_entropy_loss_backward:
     pop rbx
     pop rbp
     ret
+; Mark stack as non-executable
+section .note.GNU-stack noalloc noexec nowrite progbits

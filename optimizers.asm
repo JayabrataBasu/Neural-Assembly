@@ -1346,3 +1346,5 @@ optimizer_load_state:
     pop rbx
     pop rbp
     ret
+; Mark stack as non-executable
+section .note.GNU-stack noalloc noexec nowrite progbits

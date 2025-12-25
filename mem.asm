@@ -97,11 +97,17 @@ mem_alloc_aligned:
     mov rbp, rsp
     push rbx
     push r12
-    sub rsp, 16             ; Space for local variable + alignment
+    sub rsp, 24             ; Space for local variable + 16-byte stack alignment
     
     ; Save parameters
     mov rbx, rdi            ; size
     mov r12, rsi            ; alignment
+    
+    ; Ensure alignment is at least 8 (sizeof(void*))
+    cmp r12, 8
+    jae .align_ok
+    mov r12, 8
+.align_ok:
     
     ; posix_memalign(void **memptr, size_t alignment, size_t size)
     lea rdi, [rsp]          ; memptr - address of local variable
@@ -116,7 +122,7 @@ mem_alloc_aligned:
     ; Get the allocated pointer
     mov rax, [rsp]
     
-    add rsp, 16
+    add rsp, 24
     pop r12
     pop rbx
     pop rbp
@@ -124,7 +130,7 @@ mem_alloc_aligned:
 
 .aligned_alloc_failed:
     xor eax, eax            ; Return NULL
-    add rsp, 16
+    add rsp, 24
     pop r12
     pop rbx
     pop rbp
@@ -178,3 +184,5 @@ mem_copy:
     pop rdi
     pop rbp
     ret
+; Mark stack as non-executable
+section .note.GNU-stack noalloc noexec nowrite progbits

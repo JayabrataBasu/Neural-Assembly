@@ -51,6 +51,14 @@ section .data
     msg_error:      db "[!] Error: ", 0
     newline:        db 10, 0
     
+    ; SIMD messages
+    msg_simd:       db "[*] SIMD: ", 0
+    msg_simd_sse:   db "SSE2", 0
+    msg_simd_avx:   db "AVX", 0
+    msg_simd_avx2:  db "AVX2", 0
+    msg_simd_avx512: db "AVX-512", 0
+    msg_simd_none:  db "Scalar (no SIMD)", 0
+    
     ; Default output filename
     default_model:  db "model.bin", 0
     opt_file_name:  db "optimizer.bin", 0
@@ -173,6 +181,10 @@ section .text
     extern autograd_backward
     extern autograd_zero_grad
     
+    ; SIMD detection
+    extern detect_cpu_features
+    extern get_simd_level
+    
     ; Utils
     extern print_string
     extern print_int
@@ -212,6 +224,41 @@ main:
     
     ; Initialize autograd
     call autograd_init
+    
+    ; Detect and display SIMD capabilities
+    call detect_cpu_features
+    mov r12d, eax               ; save SIMD level
+    
+    lea rdi, [msg_simd]
+    call print_string
+    
+    ; Print SIMD level name based on return value
+    cmp r12d, 4
+    je .simd_avx512
+    cmp r12d, 3
+    je .simd_avx2
+    cmp r12d, 2
+    je .simd_avx
+    cmp r12d, 1
+    je .simd_sse
+    
+    lea rdi, [msg_simd_none]
+    jmp .simd_print
+.simd_sse:
+    lea rdi, [msg_simd_sse]
+    jmp .simd_print
+.simd_avx:
+    lea rdi, [msg_simd_avx]
+    jmp .simd_print
+.simd_avx2:
+    lea rdi, [msg_simd_avx2]
+    jmp .simd_print
+.simd_avx512:
+    lea rdi, [msg_simd_avx512]
+.simd_print:
+    call print_string
+    lea rdi, [newline]
+    call print_string
     
     ; Print banner
     lea rdi, [banner]
@@ -2043,3 +2090,5 @@ get_time_ns:
     add rsp, 32
     pop rbp
     ret
+; Mark stack as non-executable
+section .note.GNU-stack noalloc noexec nowrite progbits
