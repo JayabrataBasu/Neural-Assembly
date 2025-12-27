@@ -32,7 +32,7 @@ section .data
     msg_avx512:     db "AVX-512", 0
     msg_fma:        db "FMA", 0
     msg_detected:   db " detected", 10, 0
-    msg_using:      db "[SIMD] Using: ", 0
+    msg_using:      db "[rel SIMD] Using: ", 0
     msg_newline:    db 10, 0
 
 section .bss
@@ -69,7 +69,7 @@ detect_cpu_features:
     sub rsp, 8
     
     ; Check if already detected
-    cmp dword [features_detected], 1
+    cmp dword [rel features_detected], 1
     je .return_level
     
     ; CPUID check for SSE/SSE2 (function 1)
@@ -79,25 +79,25 @@ detect_cpu_features:
     
     ; EDX bit 25 = SSE, bit 26 = SSE2
     bt edx, 25
-    setc byte [has_sse]
+    setc byte [rel has_sse]
     bt edx, 26
-    setc byte [has_sse2]
+    setc byte [rel has_sse2]
     
     ; ECX bit 0 = SSE3, bit 9 = SSSE3, bit 19 = SSE4.1, bit 20 = SSE4.2
     bt ecx, 0
-    setc byte [has_sse3]
+    setc byte [rel has_sse3]
     bt ecx, 9
-    setc byte [has_ssse3]
+    setc byte [rel has_ssse3]
     bt ecx, 19
-    setc byte [has_sse41]
+    setc byte [rel has_sse41]
     bt ecx, 20
-    setc byte [has_sse42]
+    setc byte [rel has_sse42]
     
     ; ECX bit 28 = AVX, bit 12 = FMA
     bt ecx, 28
-    setc byte [has_avx]
+    setc byte [rel has_avx]
     bt ecx, 12
-    setc byte [has_fma]
+    setc byte [rel has_fma]
     
     ; Check for AVX2 (CPUID function 7, subleaf 0)
     mov eax, 7
@@ -106,37 +106,37 @@ detect_cpu_features:
     
     ; EBX bit 5 = AVX2
     bt ebx, 5
-    setc byte [has_avx2]
+    setc byte [rel has_avx2]
     
     ; EBX bit 16 = AVX-512F, bit 17 = AVX-512DQ
     bt ebx, 16
-    setc byte [has_avx512f]
+    setc byte [rel has_avx512f]
     bt ebx, 17
-    setc byte [has_avx512dq]
+    setc byte [rel has_avx512dq]
     
     ; EBX bit 31 = AVX-512VL
     bt ebx, 31
-    setc byte [has_avx512vl]
+    setc byte [rel has_avx512vl]
     
-    mov dword [features_detected], 1
+    mov dword [rel features_detected], 1
     
 .return_level:
     ; Determine highest level
     xor eax, eax                ; 0 = scalar
     
-    cmp byte [has_sse2], 0
+    cmp byte [rel has_sse2], 0
     je .done
     mov eax, 1                  ; SSE
     
-    cmp byte [has_avx], 0
+    cmp byte [rel has_avx], 0
     je .done
     mov eax, 2                  ; AVX
     
-    cmp byte [has_avx2], 0
+    cmp byte [rel has_avx2], 0
     je .done
     mov eax, 3                  ; AVX2
     
-    cmp byte [has_avx512f], 0
+    cmp byte [rel has_avx512f], 0
     je .done
     mov eax, 4                  ; AVX-512
     
@@ -156,22 +156,22 @@ get_simd_level:
     push rbp
     mov rbp, rsp
     
-    cmp dword [features_detected], 0
+    cmp dword [rel features_detected], 0
     jne .get_level
     call detect_cpu_features
     
 .get_level:
     xor eax, eax
-    cmp byte [has_sse2], 0
+    cmp byte [rel has_sse2], 0
     je .done
     inc eax
-    cmp byte [has_avx], 0
+    cmp byte [rel has_avx], 0
     je .done
     inc eax
-    cmp byte [has_avx2], 0
+    cmp byte [rel has_avx2], 0
     je .done
     inc eax
-    cmp byte [has_avx512f], 0
+    cmp byte [rel has_avx512f], 0
     je .done
     inc eax
     
@@ -220,10 +220,10 @@ simd_add_f32:
     jz .avx512_remainder
     
 .avx512_loop:
-    vmovups zmm0, [r13]
-    vmovups zmm1, [r14]
+    vmovups zmm0, [rel r13]
+    vmovups zmm1, [rel r14]
     vaddps zmm0, zmm0, zmm1
-    vmovups [r12], zmm0
+    vmovups [rel r12], zmm0
     add r13, 64
     add r14, 64
     add r12, 64
@@ -244,10 +244,10 @@ simd_add_f32:
     jz .avx_remainder
     
 .avx_loop:
-    vmovups ymm0, [r13]
-    vmovups ymm1, [r14]
+    vmovups ymm0, [rel r13]
+    vmovups ymm1, [rel r14]
     vaddps ymm0, ymm0, ymm1
-    vmovups [r12], ymm0
+    vmovups [rel r12], ymm0
     add r13, 32
     add r14, 32
     add r12, 32
@@ -267,10 +267,10 @@ simd_add_f32:
     jz .sse_remainder
     
 .sse_loop:
-    movups xmm0, [r13]
-    movups xmm1, [r14]
+    movups xmm0, [rel r13]
+    movups xmm1, [rel r14]
     addps xmm0, xmm1
-    movups [r12], xmm0
+    movups [rel r12], xmm0
     add r13, 16
     add r14, 16
     add r12, 16
@@ -286,9 +286,9 @@ simd_add_f32:
     jz .add_done
     
 .scalar_loop:
-    movss xmm0, [r13]
-    addss xmm0, [r14]
-    movss [r12], xmm0
+    movss xmm0, [rel r13]
+    addss xmm0, [rel r14]
+    movss [rel r12], xmm0
     add r13, 4
     add r14, 4
     add r12, 4
@@ -342,10 +342,10 @@ simd_mul_f32:
     jz .avx512_mul_rem
     
 .avx512_mul_loop:
-    vmovups zmm0, [r13]
-    vmovups zmm1, [r14]
+    vmovups zmm0, [rel r13]
+    vmovups zmm1, [rel r14]
     vmulps zmm0, zmm0, zmm1
-    vmovups [r12], zmm0
+    vmovups [rel r12], zmm0
     add r13, 64
     add r14, 64
     add r12, 64
@@ -364,10 +364,10 @@ simd_mul_f32:
     jz .avx_mul_rem
     
 .avx_mul_loop:
-    vmovups ymm0, [r13]
-    vmovups ymm1, [r14]
+    vmovups ymm0, [rel r13]
+    vmovups ymm1, [rel r14]
     vmulps ymm0, ymm0, ymm1
-    vmovups [r12], ymm0
+    vmovups [rel r12], ymm0
     add r13, 32
     add r14, 32
     add r12, 32
@@ -386,10 +386,10 @@ simd_mul_f32:
     jz .sse_mul_rem
     
 .sse_mul_loop:
-    movups xmm0, [r13]
-    movups xmm1, [r14]
+    movups xmm0, [rel r13]
+    movups xmm1, [rel r14]
     mulps xmm0, xmm1
-    movups [r12], xmm0
+    movups [rel r12], xmm0
     add r13, 16
     add r14, 16
     add r12, 16
@@ -405,9 +405,9 @@ simd_mul_f32:
     jz .mul_done
     
 .mul_scalar_loop:
-    movss xmm0, [r13]
-    mulss xmm0, [r14]
-    movss [r12], xmm0
+    movss xmm0, [rel r13]
+    mulss xmm0, [rel r14]
+    movss [rel r12], xmm0
     add r13, 4
     add r14, 4
     add r12, 4
@@ -450,7 +450,7 @@ simd_fma_f32:
     mov rbx, r8                 ; count
     
     ; Check for FMA support
-    cmp byte [has_fma], 0
+    cmp byte [rel has_fma], 0
     je .no_fma
     
     call get_simd_level
@@ -467,11 +467,11 @@ simd_fma_f32:
     jz .avx512_fma_rem
     
 .avx512_fma_loop:
-    vmovups zmm0, [r13]         ; a
-    vmovups zmm1, [r14]         ; b
-    vmovups zmm2, [r15]         ; c
+    vmovups zmm0, [rel r13]         ; a
+    vmovups zmm1, [rel r14]         ; b
+    vmovups zmm2, [rel r15]         ; c
     vfmadd213ps zmm0, zmm1, zmm2 ; a = a*b + c
-    vmovups [r12], zmm0
+    vmovups [rel r12], zmm0
     add r13, 64
     add r14, 64
     add r15, 64
@@ -491,11 +491,11 @@ simd_fma_f32:
     jz .avx_fma_rem
     
 .avx_fma_loop:
-    vmovups ymm0, [r13]
-    vmovups ymm1, [r14]
-    vmovups ymm2, [r15]
+    vmovups ymm0, [rel r13]
+    vmovups ymm1, [rel r14]
+    vmovups ymm2, [rel r15]
     vfmadd213ps ymm0, ymm1, ymm2
-    vmovups [r12], ymm0
+    vmovups [rel r12], ymm0
     add r13, 32
     add r14, 32
     add r15, 32
@@ -517,10 +517,10 @@ simd_fma_f32:
     jz .fma_done
     
 .fma_scalar_loop:
-    movss xmm0, [r13]
-    mulss xmm0, [r14]
-    addss xmm0, [r15]
-    movss [r12], xmm0
+    movss xmm0, [rel r13]
+    mulss xmm0, [rel r14]
+    addss xmm0, [rel r15]
+    movss [rel r12], xmm0
     add r13, 4
     add r14, 4
     add r15, 4
@@ -578,8 +578,8 @@ simd_dot_f32:
     jz .avx512_dot_rem
     
 .avx512_dot_loop:
-    vmovups zmm1, [r12]
-    vmovups zmm2, [r13]
+    vmovups zmm1, [rel r12]
+    vmovups zmm2, [rel r13]
     vfmadd231ps zmm0, zmm1, zmm2
     add r12, 64
     add r13, 64
@@ -607,8 +607,8 @@ simd_dot_f32:
     jz .avx_dot_rem
     
 .avx_dot_loop:
-    vmovups ymm1, [r12]
-    vmovups ymm2, [r13]
+    vmovups ymm1, [rel r12]
+    vmovups ymm2, [rel r13]
     vfmadd231ps ymm0, ymm1, ymm2
     add r12, 32
     add r13, 32
@@ -634,8 +634,8 @@ simd_dot_f32:
     jz .sse_dot_rem
     
 .sse_dot_loop:
-    movups xmm1, [r12]
-    movups xmm2, [r13]
+    movups xmm1, [rel r12]
+    movups xmm2, [rel r13]
     mulps xmm1, xmm2
     addps xmm0, xmm1
     add r12, 16
@@ -656,8 +656,8 @@ simd_dot_f32:
     jz .dot_done
     
 .dot_scalar_loop:
-    movss xmm1, [r12]
-    mulss xmm1, [r13]
+    movss xmm1, [rel r12]
+    mulss xmm1, [rel r13]
     addss xmm0, xmm1
     add r12, 4
     add r13, 4
@@ -706,7 +706,7 @@ simd_sum_f32:
     jz .avx512_sum_rem
     
 .avx512_sum_loop:
-    vaddps zmm0, zmm0, [r12]
+    vaddps zmm0, zmm0, [rel r12]
     add r12, 64
     dec rcx
     jnz .avx512_sum_loop
@@ -731,7 +731,7 @@ simd_sum_f32:
     jz .avx_sum_rem
     
 .avx_sum_loop:
-    vaddps ymm0, ymm0, [r12]
+    vaddps ymm0, ymm0, [rel r12]
     add r12, 32
     dec rcx
     jnz .avx_sum_loop
@@ -754,7 +754,7 @@ simd_sum_f32:
     jz .sse_sum_rem
     
 .sse_sum_loop:
-    addps xmm0, [r12]
+    addps xmm0, [rel r12]
     add r12, 16
     dec rcx
     jnz .sse_sum_loop
@@ -771,7 +771,7 @@ simd_sum_f32:
     jz .sum_done
     
 .sum_scalar_loop:
-    addss xmm0, [r12]
+    addss xmm0, [rel r12]
     add r12, 4
     dec rcx
     jnz .sum_scalar_loop

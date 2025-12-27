@@ -340,7 +340,8 @@ backward_topo_sort:
 .push_self:
     ; Push this node to stack
     mov rax, [rel topo_stack_ptr]
-    mov [rel topo_stack + rax*8], r12
+    lea rbx, [rel topo_stack]
+    mov [rbx + rax*8], r12
     inc rax
     mov [rel topo_stack_ptr], rax
 
@@ -414,7 +415,8 @@ backward:
     jz .clear_visited
     
     dec r13
-    mov r14, [rel topo_stack + r13*8]  ; current node
+    lea rbx, [rel topo_stack]
+    mov r14, [rbx + r13*8]  ; current node
     
     ; Call backward function if exists
     mov rax, [r14 + NODE_BACKWARD_FN]
@@ -434,7 +436,8 @@ backward:
     test r13, r13
     jz .done
     dec r13
-    mov rax, [rel topo_stack + r13*8]
+    lea rbx, [rel topo_stack]
+    mov rax, [rbx + r13*8]
     mov dword [rax + NODE_VISITED], 0
     jmp .clear_loop
 
@@ -501,7 +504,7 @@ node_add:
     mov rdi, 16                     ; 2 pointers
     call mem_alloc
     mov [r15 + NODE_PARENTS], rax
-    mov [rax], r12                  ; parent 0 = a
+    mov [rel rax], r12                  ; parent 0 = a
     mov [rax + 8], r13              ; parent 1 = b
     
     mov rax, r15
@@ -545,7 +548,7 @@ add_backward:
     mov r14, [r12 + NODE_PARENTS]   ; parents array
     
     ; dL/da += dL/dout
-    mov rax, [r14]                  ; parent a
+    mov rax, [rel r14]                  ; parent a
     mov rdi, [rax + NODE_GRAD]
     test rdi, rdi
     jz .skip_a
@@ -618,7 +621,7 @@ node_sub:
     mov rdi, 16
     call mem_alloc
     mov [r15 + NODE_PARENTS], rax
-    mov [rax], r12
+    mov [rel rax], r12
     mov [rax + 8], r13
     
     mov rax, r15
@@ -661,7 +664,7 @@ sub_backward:
     mov r14, [r12 + NODE_PARENTS]
     
     ; dL/da += dL/dout
-    mov rax, [r14]
+    mov rax, [rel r14]
     mov rdi, [rax + NODE_GRAD]
     test rdi, rdi
     jz .skip_a
@@ -759,7 +762,7 @@ node_mul:
     mov rdi, 16
     call mem_alloc
     mov [r15 + NODE_PARENTS], rax
-    mov [rax], r12
+    mov [rel rax], r12
     mov [rax + 8], r13
     
     mov rax, r15
@@ -803,7 +806,7 @@ mul_backward:
     mov r13, [r12 + NODE_GRAD]      ; dL/dout
     mov r14, [r12 + NODE_PARENTS]   ; parents
     
-    mov rax, [r14]                  ; parent a
+    mov rax, [rel r14]                  ; parent a
     mov rbx, [r14 + 8]              ; parent b
     
     ; Create temp tensor for products
@@ -815,7 +818,7 @@ mul_backward:
     mov r15, rax                    ; temp tensor
     
     ; dL/da += dL/dout * b
-    mov rax, [r14]
+    mov rax, [rel r14]
     mov rdi, [rax + NODE_GRAD]
     test rdi, rdi
     jz .skip_a
@@ -827,7 +830,7 @@ mul_backward:
     call ew_mul
     
     ; grad_a += temp
-    mov rax, [r14]
+    mov rax, [rel r14]
     mov rdi, [rax + NODE_GRAD]
     mov rsi, rdi
     mov rdx, r15
@@ -840,7 +843,7 @@ mul_backward:
     test rdi, rdi
     jz .cleanup
     
-    mov rax, [r14]
+    mov rax, [rel r14]
     ; temp = dL/dout * a
     mov rdi, r15
     mov rsi, r13
@@ -891,7 +894,7 @@ node_matmul:
     ; Get dimensions
     mov rax, [r12 + NODE_VALUE]
     mov rax, [rax + TENSOR_SHAPE]
-    mov r14, [rax]                  ; M
+    mov r14, [rel rax]                  ; M
     mov rbx, [rax + 8]              ; K
     
     mov rax, [r13 + NODE_VALUE]
@@ -899,11 +902,11 @@ node_matmul:
     mov r15, [rax + 8]              ; N
     
     ; Create output tensor (M x N)
-    mov qword [rsp], r14            ; shape[0] = M
+    mov qword [rel rsp], r14            ; shape[0] = M
     mov qword [rsp+8], r15          ; shape[1] = N
     
     mov rdi, 2                      ; ndim = 2
-    lea rsi, [rsp]                  ; shape
+    lea rsi, [rel rsp]                  ; shape
     mov rax, [r12 + NODE_VALUE]
     mov edx, [rax + TENSOR_DTYPE]
     call tensor_create
@@ -936,7 +939,7 @@ node_matmul:
     call mem_alloc
     pop rcx
     mov [rcx + NODE_PARENTS], rax
-    mov [rax], r12
+    mov [rel rax], r12
     mov [rax + 8], r13
     
     mov rax, [rsp+24]
@@ -981,14 +984,14 @@ matmul_backward:
     mov r13, [r12 + NODE_GRAD]      ; dL/dout (M x N)
     mov r14, [r12 + NODE_PARENTS]
     
-    mov rbx, [r14]                  ; parent A (M x K)
+    mov rbx, [rel r14]                  ; parent A (M x K)
     mov r15, [r14 + 8]              ; parent B (K x N)
     
     ; Get dimensions
     mov rax, [rbx + NODE_VALUE]
     mov rax, [rax + TENSOR_SHAPE]
-    mov rcx, [rax]                  ; M
-    mov [rsp], rcx
+    mov rcx, [rel rax]                  ; M
+    mov [rel rsp], rcx
     mov rcx, [rax + 8]              ; K
     mov [rsp+8], rcx
     
@@ -1021,7 +1024,7 @@ matmul_backward:
     call tensor_transpose_2d
     
     ; Create temp for dL/dout @ B^T (M x K)
-    mov rdi, [rsp]                  ; M
+    mov rdi, [rel rsp]                  ; M
     mov [rsp+24], rdi
     mov rdi, [rsp+8]                ; K
     mov [rsp+32], rdi
@@ -1060,7 +1063,7 @@ matmul_backward:
     ; Create A^T (K x M)
     mov rdi, [rsp+8]                ; K
     mov [rsp+24], rdi
-    mov rdi, [rsp]                  ; M
+    mov rdi, [rel rsp]                  ; M
     mov [rsp+32], rdi
     
     mov rdi, 2

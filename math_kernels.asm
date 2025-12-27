@@ -103,10 +103,10 @@ ew_add:
     jz .add_f32_remainder
     
 .add_f32_avx_loop:
-    vmovups ymm0, [rsi]
-    vmovups ymm1, [rdx]
+    vmovups ymm0, [rel rsi]
+    vmovups ymm1, [rel rdx]
     vaddps ymm0, ymm0, ymm1
-    vmovups [rdi], ymm0
+    vmovups [rel rdi], ymm0
     add rsi, 32
     add rdx, 32
     add rdi, 32
@@ -121,9 +121,9 @@ ew_add:
     jz .done
 
 .add_f32_scalar_loop:
-    movss xmm0, [rsi]
-    addss xmm0, [rdx]
-    movss [rdi], xmm0
+    movss xmm0, [rel rsi]
+    addss xmm0, [rel rdx]
+    movss [rel rdi], xmm0
     add rsi, 4
     add rdx, 4
     add rdi, 4
@@ -139,10 +139,10 @@ ew_add:
     jz .add_f64_remainder
 
 .add_f64_avx_loop:
-    vmovupd ymm0, [rsi]
-    vmovupd ymm1, [rdx]
+    vmovupd ymm0, [rel rsi]
+    vmovupd ymm1, [rel rdx]
     vaddpd ymm0, ymm0, ymm1
-    vmovupd [rdi], ymm0
+    vmovupd [rel rdi], ymm0
     add rsi, 32
     add rdx, 32
     add rdi, 32
@@ -156,9 +156,9 @@ ew_add:
     jz .done
 
 .add_f64_scalar_loop:
-    movsd xmm0, [rsi]
-    addsd xmm0, [rdx]
-    movsd [rdi], xmm0
+    movsd xmm0, [rel rsi]
+    addsd xmm0, [rel rdx]
+    movsd [rel rdi], xmm0
     add rsi, 8
     add rdx, 8
     add rdi, 8
@@ -215,10 +215,10 @@ ew_sub:
     jz .sub_f32_remainder
 
 .sub_f32_avx_loop:
-    vmovups ymm0, [rsi]
-    vmovups ymm1, [rdx]
+    vmovups ymm0, [rel rsi]
+    vmovups ymm1, [rel rdx]
     vsubps ymm0, ymm0, ymm1
-    vmovups [rdi], ymm0
+    vmovups [rel rdi], ymm0
     add rsi, 32
     add rdx, 32
     add rdi, 32
@@ -232,9 +232,9 @@ ew_sub:
     jz .done
 
 .sub_f32_scalar_loop:
-    movss xmm0, [rsi]
-    subss xmm0, [rdx]
-    movss [rdi], xmm0
+    movss xmm0, [rel rsi]
+    subss xmm0, [rel rdx]
+    movss [rel rdi], xmm0
     add rsi, 4
     add rdx, 4
     add rdi, 4
@@ -249,10 +249,10 @@ ew_sub:
     jz .sub_f64_remainder
 
 .sub_f64_avx_loop:
-    vmovupd ymm0, [rsi]
-    vmovupd ymm1, [rdx]
+    vmovupd ymm0, [rel rsi]
+    vmovupd ymm1, [rel rdx]
     vsubpd ymm0, ymm0, ymm1
-    vmovupd [rdi], ymm0
+    vmovupd [rel rdi], ymm0
     add rsi, 32
     add rdx, 32
     add rdi, 32
@@ -266,9 +266,9 @@ ew_sub:
     jz .done
 
 .sub_f64_scalar_loop:
-    movsd xmm0, [rsi]
-    subsd xmm0, [rdx]
-    movsd [rdi], xmm0
+    movsd xmm0, [rel rsi]
+    subsd xmm0, [rel rdx]
+    movsd [rel rdi], xmm0
     add rsi, 8
     add rdx, 8
     add rdi, 8
@@ -325,10 +325,10 @@ ew_mul:
     jz .mul_f32_remainder
 
 .mul_f32_avx_loop:
-    vmovups ymm0, [rsi]
-    vmovups ymm1, [rdx]
+    vmovups ymm0, [rel rsi]
+    vmovups ymm1, [rel rdx]
     vmulps ymm0, ymm0, ymm1
-    vmovups [rdi], ymm0
+    vmovups [rel rdi], ymm0
     add rsi, 32
     add rdx, 32
     add rdi, 32
@@ -342,9 +342,9 @@ ew_mul:
     jz .done
 
 .mul_f32_scalar_loop:
-    movss xmm0, [rsi]
-    mulss xmm0, [rdx]
-    movss [rdi], xmm0
+    movss xmm0, [rel rsi]
+    mulss xmm0, [rel rdx]
+    movss [rel rdi], xmm0
     add rsi, 4
     add rdx, 4
     add rdi, 4
@@ -359,10 +359,10 @@ ew_mul:
     jz .mul_f64_remainder
 
 .mul_f64_avx_loop:
-    vmovupd ymm0, [rsi]
-    vmovupd ymm1, [rdx]
+    vmovupd ymm0, [rel rsi]
+    vmovupd ymm1, [rel rdx]
     vmulpd ymm0, ymm0, ymm1
-    vmovupd [rdi], ymm0
+    vmovupd [rel rdi], ymm0
     add rsi, 32
     add rdx, 32
     add rdi, 32
@@ -376,9 +376,9 @@ ew_mul:
     jz .done
 
 .mul_f64_scalar_loop:
-    movsd xmm0, [rsi]
-    mulsd xmm0, [rdx]
-    movsd [rdi], xmm0
+    movsd xmm0, [rel rsi]
+    mulsd xmm0, [rel rdx]
+    movsd [rel rdi], xmm0
     add rsi, 8
     add rdx, 8
     add rdi, 8
@@ -435,10 +435,10 @@ ew_div:
     jz .div_f32_remainder
 
 .div_f32_avx_loop:
-    vmovups ymm0, [rsi]
-    vmovups ymm1, [rdx]
+    vmovups ymm0, [rel rsi]
+    vmovups ymm1, [rel rdx]
     vdivps ymm0, ymm0, ymm1
-    vmovups [rdi], ymm0
+    vmovups [rel rdi], ymm0
     add rsi, 32
     add rdx, 32
     add rdi, 32
@@ -452,9 +452,9 @@ ew_div:
     jz .done
 
 .div_f32_scalar_loop:
-    movss xmm0, [rsi]
-    divss xmm0, [rdx]
-    movss [rdi], xmm0
+    movss xmm0, [rel rsi]
+    divss xmm0, [rel rdx]
+    movss [rel rdi], xmm0
     add rsi, 4
     add rdx, 4
     add rdi, 4
@@ -469,10 +469,10 @@ ew_div:
     jz .div_f64_remainder
 
 .div_f64_avx_loop:
-    vmovupd ymm0, [rsi]
-    vmovupd ymm1, [rdx]
+    vmovupd ymm0, [rel rsi]
+    vmovupd ymm1, [rel rdx]
     vdivpd ymm0, ymm0, ymm1
-    vmovupd [rdi], ymm0
+    vmovupd [rel rdi], ymm0
     add rsi, 32
     add rdx, 32
     add rdi, 32
@@ -486,9 +486,9 @@ ew_div:
     jz .done
 
 .div_f64_scalar_loop:
-    movsd xmm0, [rsi]
-    divsd xmm0, [rdx]
-    movsd [rdi], xmm0
+    movsd xmm0, [rel rsi]
+    divsd xmm0, [rel rdx]
+    movsd [rel rdi], xmm0
     add rsi, 8
     add rdx, 8
     add rdi, 8
@@ -523,7 +523,7 @@ ew_scalar_add:
     
     mov r12, rdi
     mov r13, rsi
-    movsd [rsp], xmm0               ; Save scalar
+    movsd [rel rsp], xmm0               ; Save scalar
     
     mov rdi, r12
     call tensor_numel
@@ -531,7 +531,7 @@ ew_scalar_add:
     
     mov rdi, [r12 + TENSOR_DATA]
     mov rsi, [r13 + TENSOR_DATA]
-    movsd xmm1, [rsp]               ; scalar
+    movsd xmm1, [rel rsp]               ; scalar
     
     mov eax, [r12 + TENSOR_DTYPE]
     cmp eax, DT_FLOAT32
@@ -550,9 +550,9 @@ ew_scalar_add:
     jz .scalar_add_f32_remainder
 
 .scalar_add_f32_avx_loop:
-    vmovups ymm0, [rsi]
+    vmovups ymm0, [rel rsi]
     vaddps ymm0, ymm0, ymm1
-    vmovups [rdi], ymm0
+    vmovups [rel rdi], ymm0
     add rsi, 32
     add rdi, 32
     dec rcx
@@ -565,9 +565,9 @@ ew_scalar_add:
     jz .done
 
 .scalar_add_f32_scalar_loop:
-    movss xmm0, [rsi]
+    movss xmm0, [rel rsi]
     addss xmm0, xmm1
-    movss [rdi], xmm0
+    movss [rel rdi], xmm0
     add rsi, 4
     add rdi, 4
     dec rcx
@@ -583,9 +583,9 @@ ew_scalar_add:
     jz .scalar_add_f64_remainder
 
 .scalar_add_f64_avx_loop:
-    vmovupd ymm0, [rsi]
+    vmovupd ymm0, [rel rsi]
     vaddpd ymm0, ymm0, ymm1
-    vmovupd [rdi], ymm0
+    vmovupd [rel rdi], ymm0
     add rsi, 32
     add rdi, 32
     dec rcx
@@ -598,9 +598,9 @@ ew_scalar_add:
     jz .done
 
 .scalar_add_f64_scalar_loop:
-    movsd xmm0, [rsi]
+    movsd xmm0, [rel rsi]
     addsd xmm0, xmm1
-    movsd [rdi], xmm0
+    movsd [rel rdi], xmm0
     add rsi, 8
     add rdi, 8
     dec rcx
@@ -632,7 +632,7 @@ ew_scalar_mul:
     
     mov r12, rdi
     mov r13, rsi
-    movsd [rsp], xmm0
+    movsd [rel rsp], xmm0
     
     mov rdi, r12
     call tensor_numel
@@ -640,7 +640,7 @@ ew_scalar_mul:
     
     mov rdi, [r12 + TENSOR_DATA]
     mov rsi, [r13 + TENSOR_DATA]
-    movsd xmm1, [rsp]
+    movsd xmm1, [rel rsp]
     
     mov eax, [r12 + TENSOR_DTYPE]
     cmp eax, DT_FLOAT32
@@ -659,9 +659,9 @@ ew_scalar_mul:
     jz .scalar_mul_f32_remainder
 
 .scalar_mul_f32_avx_loop:
-    vmovups ymm0, [rsi]
+    vmovups ymm0, [rel rsi]
     vmulps ymm0, ymm0, ymm1
-    vmovups [rdi], ymm0
+    vmovups [rel rdi], ymm0
     add rsi, 32
     add rdi, 32
     dec rcx
@@ -674,9 +674,9 @@ ew_scalar_mul:
     jz .done
 
 .scalar_mul_f32_scalar_loop:
-    movss xmm0, [rsi]
+    movss xmm0, [rel rsi]
     mulss xmm0, xmm1
-    movss [rdi], xmm0
+    movss [rel rdi], xmm0
     add rsi, 4
     add rdi, 4
     dec rcx
@@ -692,9 +692,9 @@ ew_scalar_mul:
     jz .scalar_mul_f64_remainder
 
 .scalar_mul_f64_avx_loop:
-    vmovupd ymm0, [rsi]
+    vmovupd ymm0, [rel rsi]
     vmulpd ymm0, ymm0, ymm1
-    vmovupd [rdi], ymm0
+    vmovupd [rel rdi], ymm0
     add rsi, 32
     add rdi, 32
     dec rcx
@@ -707,9 +707,9 @@ ew_scalar_mul:
     jz .done
 
 .scalar_mul_f64_scalar_loop:
-    movsd xmm0, [rsi]
+    movsd xmm0, [rel rsi]
     mulsd xmm0, xmm1
-    movsd [rdi], xmm0
+    movsd [rel rdi], xmm0
     add rsi, 8
     add rdi, 8
     dec rcx
@@ -763,10 +763,10 @@ ew_max:
     jz .max_f32_remainder
 
 .max_f32_avx_loop:
-    vmovups ymm0, [rsi]
-    vmovups ymm1, [rdx]
+    vmovups ymm0, [rel rsi]
+    vmovups ymm1, [rel rdx]
     vmaxps ymm0, ymm0, ymm1
-    vmovups [rdi], ymm0
+    vmovups [rel rdi], ymm0
     add rsi, 32
     add rdx, 32
     add rdi, 32
@@ -780,9 +780,9 @@ ew_max:
     jz .done
 
 .max_f32_scalar_loop:
-    movss xmm0, [rsi]
-    maxss xmm0, [rdx]
-    movss [rdi], xmm0
+    movss xmm0, [rel rsi]
+    maxss xmm0, [rel rdx]
+    movss [rel rdi], xmm0
     add rsi, 4
     add rdx, 4
     add rdi, 4
@@ -797,10 +797,10 @@ ew_max:
     jz .max_f64_remainder
 
 .max_f64_avx_loop:
-    vmovupd ymm0, [rsi]
-    vmovupd ymm1, [rdx]
+    vmovupd ymm0, [rel rsi]
+    vmovupd ymm1, [rel rdx]
     vmaxpd ymm0, ymm0, ymm1
-    vmovupd [rdi], ymm0
+    vmovupd [rel rdi], ymm0
     add rsi, 32
     add rdx, 32
     add rdi, 32
@@ -814,9 +814,9 @@ ew_max:
     jz .done
 
 .max_f64_scalar_loop:
-    movsd xmm0, [rsi]
-    maxsd xmm0, [rdx]
-    movsd [rdi], xmm0
+    movsd xmm0, [rel rsi]
+    maxsd xmm0, [rel rdx]
+    movsd [rel rdi], xmm0
     add rsi, 8
     add rdx, 8
     add rdi, 8
@@ -877,9 +877,9 @@ ew_neg:
     jz .neg_f32_remainder
 
 .neg_f32_avx_loop:
-    vmovups ymm0, [rsi]
+    vmovups ymm0, [rel rsi]
     vxorps ymm0, ymm0, ymm2
-    vmovups [rdi], ymm0
+    vmovups [rel rdi], ymm0
     add rsi, 32
     add rdi, 32
     dec rcx
@@ -892,9 +892,9 @@ ew_neg:
     jz .done
 
 .neg_f32_scalar_loop:
-    movss xmm0, [rsi]
+    movss xmm0, [rel rsi]
     xorps xmm0, xmm2
-    movss [rdi], xmm0
+    movss [rel rdi], xmm0
     add rsi, 4
     add rdi, 4
     dec rcx
@@ -912,9 +912,9 @@ ew_neg:
     jz .neg_f64_remainder
 
 .neg_f64_avx_loop:
-    vmovupd ymm0, [rsi]
+    vmovupd ymm0, [rel rsi]
     vxorpd ymm0, ymm0, ymm2
-    vmovupd [rdi], ymm0
+    vmovupd [rel rdi], ymm0
     add rsi, 32
     add rdi, 32
     dec rcx
@@ -927,9 +927,9 @@ ew_neg:
     jz .done
 
 .neg_f64_scalar_loop:
-    movsd xmm0, [rsi]
+    movsd xmm0, [rel rsi]
     xorpd xmm0, xmm2
-    movsd [rdi], xmm0
+    movsd [rel rdi], xmm0
     add rsi, 8
     add rdi, 8
     dec rcx
@@ -998,7 +998,7 @@ reduce_sum:
     jz .sum_all_f32_remainder
 
 .sum_all_f32_avx_loop:
-    vmovups ymm1, [rsi]
+    vmovups ymm1, [rel rsi]
     vaddps ymm0, ymm0, ymm1
     add rsi, 32
     dec rcx
@@ -1017,7 +1017,7 @@ reduce_sum:
     jz .store_f32
 
 .sum_all_f32_scalar_loop:
-    movss xmm1, [rsi]
+    movss xmm1, [rel rsi]
     addss xmm0, xmm1
     add rsi, 4
     dec rcx
@@ -1025,7 +1025,7 @@ reduce_sum:
 
 .store_f32:
     mov rdi, [r14 + TENSOR_DATA]
-    movss [rdi], xmm0
+    movss [rel rdi], xmm0
     jmp .done
 
 .sum_all_f64:
@@ -1037,7 +1037,7 @@ reduce_sum:
     jz .sum_all_f64_remainder
 
 .sum_all_f64_avx_loop:
-    vmovupd ymm1, [rsi]
+    vmovupd ymm1, [rel rsi]
     vaddpd ymm0, ymm0, ymm1
     add rsi, 32
     dec rcx
@@ -1055,7 +1055,7 @@ reduce_sum:
     jz .store_f64
 
 .sum_all_f64_scalar_loop:
-    movsd xmm1, [rsi]
+    movsd xmm1, [rel rsi]
     addsd xmm0, xmm1
     add rsi, 8
     dec rcx
@@ -1063,7 +1063,7 @@ reduce_sum:
 
 .store_f64:
     mov rdi, [r14 + TENSOR_DATA]
-    movsd [rdi], xmm0
+    movsd [rel rdi], xmm0
 
 .done:
     vzeroupper
@@ -1112,16 +1112,16 @@ reduce_mean:
     je .mean_f32
     
     ; float64
-    movsd xmm0, [rdi]
+    movsd xmm0, [rel rdi]
     divsd xmm0, xmm1
-    movsd [rdi], xmm0
+    movsd [rel rdi], xmm0
     jmp .done
 
 .mean_f32:
     cvtsd2ss xmm1, xmm1
-    movss xmm0, [rdi]
+    movss xmm0, [rel rdi]
     divss xmm0, xmm1
-    movss [rdi], xmm0
+    movss [rel rdi], xmm0
 
 .done:
     add rsp, 8
@@ -1150,13 +1150,13 @@ matmul:
     sub rsp, 72                     ; Local storage
     
     ; Save tensor pointers
-    mov [rsp], rdi                  ; out
+    mov [rel rsp], rdi                  ; out
     mov [rsp+8], rsi                ; A
     mov [rsp+16], rdx               ; B
     
     ; Get dimensions
     mov rax, [rsi + TENSOR_SHAPE]
-    mov r12, [rax]                  ; M
+    mov r12, [rel rax]                  ; M
     mov r13, [rax + 8]              ; K
     
     mov rax, [rdx + TENSOR_SHAPE]
@@ -1168,7 +1168,7 @@ matmul:
     mov [rsp+40], r14               ; N
     
     ; Get data pointers
-    mov rax, [rsp]
+    mov rax, [rel rsp]
     mov r15, [rax + TENSOR_DATA]    ; out data
     mov rax, [rsp+8]
     mov rbx, [rax + TENSOR_DATA]    ; A data
@@ -1324,7 +1324,7 @@ tensor_transpose_2d:
     
     ; Get dimensions
     mov rax, [r13 + TENSOR_SHAPE]
-    mov r14, [rax]                  ; M (rows of input)
+    mov r14, [rel rax]                  ; M (rows of input)
     mov r15, [rax + 8]              ; N (cols of input)
     
     mov rdi, [r12 + TENSOR_DATA]    ; out data

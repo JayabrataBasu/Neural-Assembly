@@ -11,7 +11,7 @@ section .data
     banner_len:     equ $ - banner
     
     ; Usage message
-    usage_msg:      db "Usage: neural_framework <command> <config> [model]", 10
+    usage_msg:      db "Usage: neural_framework <command> <config> [rel model]", 10
                     db "Commands:", 10
                     db "  train   - Train a new model", 10
                     db "  infer   - Run inference with trained model", 10
@@ -155,6 +155,10 @@ section .text
     extern mse_loss_backward
     extern cross_entropy_loss
     extern cross_entropy_loss_backward
+    extern bce_loss
+    extern bce_loss_backward
+    extern mse_loss
+    extern mse_loss_backward
     
     ; Optimizers
     extern sgd_create
@@ -211,8 +215,8 @@ main:
     push r15
     sub rsp, 72
     ; Store argc/argv provided by C runtime (rdi = argc, rsi = argv)
-    mov [argc], rdi
-    mov [argv], rsi
+    mov [rel argc], rdi
+    mov [rel argv], rsi
 
     ; Initialize memory subsystem
     call mem_init
@@ -229,7 +233,7 @@ main:
     call detect_cpu_features
     mov r12d, eax               ; save SIMD level
     
-    lea rdi, [msg_simd]
+    lea rdi, [rel msg_simd]
     call print_string
     
     ; Print SIMD level name based on return value
@@ -242,77 +246,77 @@ main:
     cmp r12d, 1
     je .simd_sse
     
-    lea rdi, [msg_simd_none]
+    lea rdi, [rel msg_simd_none]
     jmp .simd_print
 .simd_sse:
-    lea rdi, [msg_simd_sse]
+    lea rdi, [rel msg_simd_sse]
     jmp .simd_print
 .simd_avx:
-    lea rdi, [msg_simd_avx]
+    lea rdi, [rel msg_simd_avx]
     jmp .simd_print
 .simd_avx2:
-    lea rdi, [msg_simd_avx2]
+    lea rdi, [rel msg_simd_avx2]
     jmp .simd_print
 .simd_avx512:
-    lea rdi, [msg_simd_avx512]
+    lea rdi, [rel msg_simd_avx512]
 .simd_print:
     call print_string
-    lea rdi, [newline]
+    lea rdi, [rel newline]
     call print_string
     
     ; Print banner
-    lea rdi, [banner]
+    lea rdi, [rel banner]
     call print_string
     
     ; Check arguments (at least 2 for test command, 3 for others)
-    mov rax, [argc]
+    mov rax, [rel argc]
     cmp rax, 2
     jl .show_usage
     
     ; Get command (argv[1])
-    mov rax, [argv]
+    mov rax, [rel argv]
     mov r12, [rax + 8]          ; argv[1] = command
     
     ; Check if it's 'test' command (doesn't need config)
     mov rdi, r12
-    lea rsi, [cmd_test]
+    lea rsi, [rel cmd_test]
     call str_equals_nocase
     test eax, eax
     jnz .do_test
     
     ; Other commands need at least 3 args
-    mov rax, [argc]
+    mov rax, [rel argc]
     cmp rax, 3
     jl .show_usage
     
     ; Get config file (argv[2])
-    mov rax, [argv]
+    mov rax, [rel argv]
     mov r13, [rax + 16]         ; argv[2] = config
     
     ; Check for optional model file (argv[3])
     xor r14, r14
-    mov rax, [argc]
+    mov rax, [rel argc]
     cmp rax, 4
     jl .no_model_arg
-    mov rax, [argv]
+    mov rax, [rel argv]
     mov r14, [rax + 24]         ; argv[3] = model file
     
 .no_model_arg:
     ; Parse command
     mov rdi, r12
-    lea rsi, [cmd_train]
+    lea rsi, [rel cmd_train]
     call str_equals_nocase
     test eax, eax
     jnz .do_train
     
     mov rdi, r12
-    lea rsi, [cmd_infer]
+    lea rsi, [rel cmd_infer]
     call str_equals_nocase
     test eax, eax
     jnz .do_infer
     
     mov rdi, r12
-    lea rsi, [cmd_test]
+    lea rsi, [rel cmd_test]
     call str_equals_nocase
     test eax, eax
     jnz .do_test
@@ -340,14 +344,14 @@ main:
     jmp .main_done
     
 .show_usage:
-    lea rdi, [usage_msg]
+    lea rdi, [rel usage_msg]
     call print_string
     xor eax, eax
     jmp .main_exit
     
 .main_done:
     ; Cleanup
-    mov rdi, [config_ptr]
+    mov rdi, [rel config_ptr]
     test rdi, rdi
     jz .main_exit
     call config_free
@@ -381,7 +385,7 @@ cmd_train_handler:
     mov r13, rsi                ; model output file
     
     ; Load configuration
-    lea rdi, [msg_loading]
+    lea rdi, [rel msg_loading]
     call print_string
     
     mov rdi, r12
@@ -390,17 +394,17 @@ cmd_train_handler:
     test rax, rax
     jz .train_config_error
     
-    mov [config_ptr], rax
+    mov [rel config_ptr], rax
     mov r14, rax                ; config pointer
     
-    lea rdi, [msg_config_ok]
+    lea rdi, [rel msg_config_ok]
     call print_string
     
     ; Print configuration summary
     call print_config_summary
     
     ; Build model
-    lea rdi, [msg_building]
+    lea rdi, [rel msg_building]
     call print_string
     
     mov rdi, r14
@@ -409,11 +413,11 @@ cmd_train_handler:
     test rax, rax
     jz .train_build_error
     
-    mov [model_ptr], rax
+    mov [rel model_ptr], rax
     mov r15, rax                ; model pointer
     
     ; Print model info
-    lea rdi, [msg_model_ok]
+    lea rdi, [rel msg_model_ok]
     call print_string
     
     mov rdi, r15
@@ -421,7 +425,7 @@ cmd_train_handler:
     mov rdi, rax
     call print_int
     
-    lea rdi, [msg_params]
+    lea rdi, [rel msg_params]
     call print_string
     
     ; Debug: print first weight
@@ -429,7 +433,7 @@ cmd_train_handler:
     mov rdi, r14
     mov rsi, r15
     call create_optimizer
-    mov [optimizer_ptr], rax
+    mov [rel optimizer_ptr], rax
     mov rbx, rax
     
     ; Check optimizer is not NULL
@@ -439,7 +443,7 @@ cmd_train_handler:
     ; Load training dataset
     mov rdi, r14
     call load_training_data
-    mov [dataset_ptr], rax
+    mov [rel dataset_ptr], rax
     
     ; Check if training data loaded
     test rax, rax
@@ -448,27 +452,27 @@ cmd_train_handler:
     ; Load test/validation dataset (optional - no error if missing)
     mov rdi, r14
     call load_test_data
-    mov [test_dataset_ptr], rax
+    mov [rel test_dataset_ptr], rax
     
     ; Record start time
-    lea rdi, [start_time]
+    lea rdi, [rel start_time]
     call get_time_ns
     
     ; Training loop
-    lea rdi, [msg_training]
+    lea rdi, [rel msg_training]
     call print_string
     
-    lea rdi, [msg_separator]
+    lea rdi, [rel msg_separator]
     call print_string
     
-    mov eax, [r14]              ; epochs (at offset 24)
+    mov eax, [rel r14]              ; epochs (at offset 24)
     mov eax, [r14 + 24]
     mov [rbp - 80], eax         ; store total epochs
     
-    mov dword [current_epoch], 1
+    mov dword [rel current_epoch], 1
     
 .train_epoch_loop:
-    mov eax, [current_epoch]
+    mov eax, [rel current_epoch]
     cmp eax, [rbp - 80]
     ja .train_done
     
@@ -480,21 +484,21 @@ cmd_train_handler:
     mov eax, [rcx + 144]        ; OFF_LR_STEP_SIZE
     test eax, eax
     jz .skip_lr_sched
-    mov edx, [current_epoch]
+    mov edx, [rel current_epoch]
     mov ecx, eax                ; step_size
     xor edx, edx
-    mov eax, [current_epoch]
+    mov eax, [rel current_epoch]
     div ecx                     ; EAX/ECX, remainder in EDX
     test edx, edx
     jne .skip_lr_sched
     
     ; Apply decay
-    mov rdi, [optimizer_ptr]
+    mov rdi, [rel optimizer_ptr]
     call optimizer_get_lr
     movss xmm1, [r14 + 148]     ; OFF_LR_GAMMA (float32)
     cvtss2sd xmm1, xmm1
     mulsd xmm0, xmm1
-    mov rdi, [optimizer_ptr]
+    mov rdi, [rel optimizer_ptr]
     call optimizer_set_lr
 
 .skip_lr_sched:
@@ -503,50 +507,50 @@ cmd_train_handler:
     pop rax
     
     ; Print epoch number
-    lea rdi, [msg_epoch]
+    lea rdi, [rel msg_epoch]
     call print_string
-    mov edi, [current_epoch]
+    mov edi, [rel current_epoch]
     call print_int
     
     ; Reset epoch stats
-    mov dword [total_loss], 0
-    mov dword [correct_count], 0
-    mov dword [total_count], 0
+    mov dword [rel total_loss], 0
+    mov dword [rel correct_count], 0
+    mov dword [rel total_count], 0
     
     ; Shuffle dataset (only if dataset is not NULL)
-    mov rdi, [dataset_ptr]
+    mov rdi, [rel dataset_ptr]
     test rdi, rdi
     jz .skip_shuffle
     call dataset_shuffle
 .skip_shuffle:
     
     ; Train one epoch
-    mov rdi, [model_ptr]
-    mov rsi, [optimizer_ptr]
-    mov rdx, [dataset_ptr]
+    mov rdi, [rel model_ptr]
+    mov rsi, [rel optimizer_ptr]
+    mov rdx, [rel dataset_ptr]
     mov rcx, r14                ; config
     call train_epoch
     
     ; Print epoch loss
-    lea rdi, [msg_loss]
+    lea rdi, [rel msg_loss]
     call print_string
     
-    movss xmm0, [total_loss]
+    movss xmm0, [rel total_loss]
     cvtss2sd xmm0, xmm0         ; convert to double for print_float
     mov edi, 4                  ; precision
     call print_float
     
     ; Print accuracy if applicable
-    mov eax, [total_count]
+    mov eax, [rel total_count]
     test eax, eax
     jz .skip_accuracy
     
-    lea rdi, [msg_acc]
+    lea rdi, [rel msg_acc]
     call print_string
     
     ; Calculate accuracy percentage
-    cvtsi2ss xmm0, dword [correct_count]
-    cvtsi2ss xmm1, dword [total_count]
+    cvtsi2ss xmm0, dword [rel correct_count]
+    cvtsi2ss xmm1, dword [rel total_count]
     divss xmm0, xmm1
     mov eax, 100
     cvtsi2ss xmm1, eax
@@ -563,16 +567,16 @@ cmd_train_handler:
     pop r14
     
     ; Calculate validation accuracy if test dataset exists
-    mov rax, [test_dataset_ptr]
+    mov rax, [rel test_dataset_ptr]
     test rax, rax
     jz .skip_val_accuracy
     
-    lea rdi, [msg_val]
+    lea rdi, [rel msg_val]
     call print_string
     
     ; Calculate validation accuracy
-    mov rdi, [model_ptr]
-    mov rsi, [test_dataset_ptr]
+    mov rdi, [rel model_ptr]
+    mov rsi, [rel test_dataset_ptr]
     call evaluate_model
     
     ; rax = correct, rdx = total
@@ -590,61 +594,61 @@ cmd_train_handler:
     mov edi, 2
     call print_float
     
-    lea rdi, [msg_percent]
+    lea rdi, [rel msg_percent]
     call print_string
     jmp .next_epoch
 
 .skip_val_accuracy:
-    lea rdi, [msg_newline]
+    lea rdi, [rel msg_newline]
     call print_string
     jmp .next_epoch
     
 .skip_accuracy:
-    lea rdi, [msg_newline]
+    lea rdi, [rel msg_newline]
     call print_string
     
 .next_epoch:
-    inc dword [current_epoch]
+    inc dword [rel current_epoch]
     jmp .train_epoch_loop
     
 .train_done:
-    lea rdi, [msg_separator]
+    lea rdi, [rel msg_separator]
     call print_string
     
-    lea rdi, [msg_done]
+    lea rdi, [rel msg_done]
     call print_string
     
     ; Save model
-    lea rdi, [msg_saving]
+    lea rdi, [rel msg_saving]
     call print_string
     
     ; Use default filename if not provided
     test r13, r13
     jnz .use_provided_name
-    lea r13, [default_model]
+    lea r13, [rel default_model]
     
 .use_provided_name:
-    mov rdi, [model_ptr]
+    mov rdi, [rel model_ptr]
     mov rsi, r13
     call model_save
     
-    lea rdi, [msg_saved]
+    lea rdi, [rel msg_saved]
     call print_string
     mov rdi, r13
     call print_string
-    lea rdi, [msg_newline]
+    lea rdi, [rel msg_newline]
     call print_string
     
     ; Save optimizer state alongside model
-    mov rdi, [optimizer_ptr]
+    mov rdi, [rel optimizer_ptr]
     test rdi, rdi
     jz .skip_opt_save
-    lea rsi, [opt_file_name]
+    lea rsi, [rel opt_file_name]
     call optimizer_save_state
 .skip_opt_save:
     
     ; Record end time and print duration
-    lea rdi, [end_time]
+    lea rdi, [rel end_time]
     call get_time_ns
     
     ; Print timing info
@@ -654,20 +658,20 @@ cmd_train_handler:
     jmp .train_cleanup
     
 .train_no_data:
-    lea rdi, [msg_error]
+    lea rdi, [rel msg_error]
     call print_string
     mov eax, -1
     jmp .train_cleanup
 
 .train_config_error:
-    lea rdi, [msg_error]
+    lea rdi, [rel msg_error]
     call print_string
     ; Print specific error
     mov eax, -1
     jmp .train_cleanup
     
 .train_build_error:
-    lea rdi, [msg_error]
+    lea rdi, [rel msg_error]
     call print_string
     mov eax, -1
     
@@ -697,19 +701,19 @@ cmd_infer_handler:
     mov r13, rsi                ; model file
     
     ; Load configuration
-    lea rdi, [msg_loading]
+    lea rdi, [rel msg_loading]
     call print_string
     
     mov rdi, r12
     call config_parse
-    mov [config_ptr], rax
+    mov [rel config_ptr], rax
     mov rbx, rax
     
-    lea rdi, [msg_config_ok]
+    lea rdi, [rel msg_config_ok]
     call print_string
     
     ; Load model
-    lea rdi, [msg_loading_m]
+    lea rdi, [rel msg_loading_m]
     call print_string
     
     mov rdi, r13
@@ -718,13 +722,13 @@ cmd_infer_handler:
     test rax, rax
     jz .infer_load_error
     
-    mov [model_ptr], rax
+    mov [rel model_ptr], rax
     
-    lea rdi, [msg_loaded]
+    lea rdi, [rel msg_loaded]
     call print_string
     
     ; Run inference
-    lea rdi, [msg_inferring]
+    lea rdi, [rel msg_inferring]
     call print_string
     
     ; Load test data
@@ -732,7 +736,7 @@ cmd_infer_handler:
     call load_test_data
     
     ; Run inference on test set
-    mov rdi, [model_ptr]
+    mov rdi, [rel model_ptr]
     mov rsi, rax                ; test dataset
     mov rdx, rbx                ; config
     call run_inference
@@ -741,7 +745,7 @@ cmd_infer_handler:
     jmp .infer_cleanup
     
 .infer_load_error:
-    lea rdi, [msg_error]
+    lea rdi, [rel msg_error]
     call print_string
     mov eax, -1
     
@@ -800,7 +804,7 @@ build_model:
     mov r12, rdi                ; config
     
     ; Get model parameters from config
-    mov eax, [r12]              ; input_size (offset 0)
+    mov eax, [rel r12]              ; input_size (offset 0)
     mov [rbp - 48], eax         ; save input_size
     mov eax, [r12 + 4]          ; hidden_size
     mov [rbp - 52], eax         ; save hidden_size
@@ -824,7 +828,7 @@ build_model:
     
     mov r13, rax                ; model pointer
     mov eax, [rbp - 64]
-    mov [r13], eax              ; store num_layers
+    mov [rel r13], eax              ; store num_layers
     
     ; Layer pointer offset
     lea r14, [r13 + 8]          ; current layer slot
@@ -844,11 +848,11 @@ build_model:
     xor edx, edx                ; dtype = DT_FLOAT32
     call linear_create
     
-    mov [r14], rax              ; store Linear layer
+    mov [rel r14], rax              ; store Linear layer
     add r14, 8
     
     ; Add ReLU marker
-    mov qword [r14], 1          ; ReLU marker
+    mov qword [rel r14], 1          ; ReLU marker
     add r14, 8
     
     ; Update current input size for next layer
@@ -864,12 +868,23 @@ build_model:
     xor edx, edx                ; dtype = DT_FLOAT32
     call linear_create
     
-    mov [r14], rax              ; store output Linear
+    mov [rel r14], rax              ; store output Linear
     add r14, 8
     
-    ; Add Softmax marker
-    mov qword [r14], 2          ; Softmax marker
+    ; For binary classification (output_size <= 2), use Sigmoid; else Softmax
+    mov eax, [rbp - 56]         ; output_size
+    cmp eax, 2
+    jg .use_softmax
     
+    ; Add Sigmoid marker
+    mov qword [rel r14], 3          ; Sigmoid marker (new: 3)
+    jmp .build_finish
+    
+.use_softmax:
+    ; Add Softmax marker
+    mov qword [rel r14], 2          ; Softmax marker
+    
+.build_finish:
     mov rax, r13                ; return model pointer
     jmp .build_done
     
@@ -901,14 +916,14 @@ count_parameters:
     xor ebx, ebx                ; counter
     
     ; Iterate through layers
-    mov ecx, [r12]              ; num_layers
+    mov ecx, [rel r12]              ; num_layers
     lea rdi, [r12 + 8]
     
 .count_loop:
     test ecx, ecx
     jz .count_done
     
-    mov rax, [rdi]
+    mov rax, [rel rdi]
     
     ; Check if it's a real layer (pointer > 100)
     ; Values 1, 2 are markers for ReLU, Softmax
@@ -923,7 +938,7 @@ count_parameters:
     push rdi
     mov r8, rax                 ; module pointer
     
-    mov ecx, [r8]               ; n_params
+    mov ecx, [rel r8]               ; n_params
     mov rsi, [r8 + 8]           ; params array
     test rsi, rsi
     jz .count_params_done
@@ -932,7 +947,7 @@ count_parameters:
     test ecx, ecx
     jz .count_params_done
     
-    mov rdi, [rsi]              ; params[i] = tensor pointer
+    mov rdi, [rel rsi]              ; params[rel i] = tensor pointer
     test rdi, rdi
     jz .count_param_next
     
@@ -994,7 +1009,7 @@ create_optimizer:
     ; First, count total params across all layers
     ; Model structure: offset 0 = num_layers, offset 8+ = layer pointers
     mov r12, rsi                ; model
-    mov ecx, [r12]              ; num_layers
+    mov ecx, [rel r12]              ; num_layers
     xor r13d, r13d              ; total params count
     lea r14, [r12 + 8]          ; layer pointer array
     
@@ -1002,12 +1017,12 @@ create_optimizer:
     test ecx, ecx
     jz .count_params_done
     
-    mov rax, [r14]              ; layer pointer
+    mov rax, [rel r14]              ; layer pointer
     cmp rax, 100                ; skip markers (1=ReLU, 2=Softmax)
     jb .count_next_layer
     
     ; Real layer - add its n_params
-    add r13d, [rax]             ; module->n_params at offset 0
+    add r13d, [rel rax]             ; module->n_params at offset 0
     
 .count_next_layer:
     add r14, 8
@@ -1037,7 +1052,7 @@ create_optimizer:
     
     ; Now collect params and param_nodes from all layers
     mov r12, [rbp-64]           ; model
-    mov ecx, [r12]              ; num_layers
+    mov ecx, [rel r12]              ; num_layers
     lea r14, [r12 + 8]          ; layer pointer array
     mov dword [rbp-88], 0       ; current index = 0
     mov r15, [rbp-72]           ; params dest
@@ -1049,7 +1064,7 @@ create_optimizer:
     
     push rcx                    ; save counter
     
-    mov rax, [r14]              ; layer pointer
+    mov rax, [rel r14]              ; layer pointer
     cmp rax, 100
     jb .collect_next
     
@@ -1058,7 +1073,7 @@ create_optimizer:
     ;   offset 8: params (Tensor**)
     ;   offset 16: param_nodes (Node**)
     mov r12, rax                ; module
-    mov ecx, [r12]              ; layer's n_params
+    mov ecx, [rel r12]              ; layer's n_params
     mov rsi, [r12 + 8]          ; params array
     mov rdi, [r12 + 16]         ; param_nodes array
     
@@ -1067,14 +1082,14 @@ create_optimizer:
     jz .collect_next
     
     ; Copy param tensor pointer
-    mov rax, [rsi]
-    mov [r15], rax
+    mov rax, [rel rsi]
+    mov [rel r15], rax
     add r15, 8
     add rsi, 8
     
     ; Copy param_node pointer (for optimizer to get grad later)
-    mov rax, [rdi]
-    mov [rbx], rax
+    mov rax, [rel rdi]
+    mov [rel rbx], rax
     add rbx, 8
     add rdi, 8
     
@@ -1152,7 +1167,7 @@ load_training_data:
     
     ; Call dataset_load_csv(data_path, label_path, n_features=input_size, dtype=DT_FLOAT32)
     mov rsi, [r12 + 84]         ; train_label_file pointer (OFF_TRAIN_LABEL_FILE = 84)
-    mov edx, [r12]              ; input_size (n_features) - 32-bit value
+    mov edx, [rel r12]              ; input_size (n_features) - 32-bit value
     xor rcx, rcx                ; dtype = DT_FLOAT32 (0)
     call dataset_load_csv
     
@@ -1188,7 +1203,7 @@ load_test_data:
 
     ; Call dataset_load_csv(data_path, label_path, n_features=input_size, dtype=DT_FLOAT32)
     mov rsi, [r12 + 92]         ; test_label_file pointer (OFF_TEST_LABEL_FILE = 92)
-    mov edx, [r12]              ; input_size (32-bit zero extended to rdx)
+    mov edx, [rel r12]              ; input_size (32-bit zero extended to rdx)
     xor rcx, rcx                ; dtype = DT_FLOAT32
     call dataset_load_csv
     jmp .test_load_done
@@ -1242,7 +1257,7 @@ train_epoch:
     test r14, r14
     jz .epoch_done
     
-    mov eax, [r14]              ; num_samples
+    mov eax, [rel r14]              ; num_samples
     xor edx, edx
     mov ecx, [rbp - 48]
     test ecx, ecx
@@ -1288,22 +1303,37 @@ train_epoch:
     jz .next_batch
     mov rbx, rax                ; predictions node
     
-    ; Calculate loss using cross_entropy_loss
+    ; Calculate loss - use BCE for binary (output_size=1), CE for multi-class
     mov rdi, rbx                ; predictions node
     mov rsi, [rbp - 72]         ; batch_y tensor (labels)
-    call cross_entropy_loss
     
+    ; Check output_size from config (offset 8)
+    mov eax, [r15 + 8]          ; output_size
+    cmp eax, 1
+    je .use_bce_loss
+    cmp eax, 2                  ; Also use BCE for 2-class (binary)
+    je .use_bce_loss
+    
+    ; Multi-class: use cross_entropy_loss
+    call cross_entropy_loss
+    jmp .loss_computed
+    
+.use_bce_loss:
+    ; Binary classification: use bce_loss
+    call bce_loss
+
+.loss_computed:
     push rax                    ; save loss node
     
     ; Calculate accuracy
-    mov rcx, [rbx]              ; predictions node -> value (tensor)
+    mov rcx, [rel rbx]              ; predictions node -> value (tensor)
     mov rdi, rcx                ; logits tensor
     mov rsi, [rbp - 72]         ; batch_y tensor
     call calculate_batch_accuracy
     
-    add [correct_count], eax
+    add [rel correct_count], eax
     mov eax, [rbp - 48]         ; batch_size
-    add [total_count], eax
+    add [rel total_count], eax
     
     pop rax                     ; restore loss node
     
@@ -1315,13 +1345,13 @@ train_epoch:
     
     ; rax = loss node - get scalar value and accumulate
     ; NODE_VALUE is at offset 0, TENSOR_DATA is at offset 0
-    mov rcx, [rax]              ; NODE_VALUE = loss tensor
+    mov rcx, [rel rax]              ; NODE_VALUE = loss tensor
     test rcx, rcx
     jz .do_backward
-    mov rcx, [rcx]              ; TENSOR_DATA = data pointer
+    mov rcx, [rel rcx]              ; TENSOR_DATA = data pointer
     test rcx, rcx
     jz .do_backward
-    movss xmm0, [rcx]           ; load loss value (float32)
+    movss xmm0, [rel rcx]           ; load loss value (float32)
     
     addss xmm0, [rbp - 80]      ; accumulate
     movss [rbp - 80], xmm0
@@ -1361,7 +1391,7 @@ train_epoch:
     divss xmm0, xmm1
     
 .store_loss:
-    movss [total_loss], xmm0
+    movss [rel total_loss], xmm0
     
     add rsp, 96
     pop r15
@@ -1389,20 +1419,22 @@ model_forward:
     mov r12, rdi                ; model
     mov r13, rsi                ; current activation
     
-    mov ebx, [r12]              ; num_layers
+    mov ebx, [rel r12]              ; num_layers
     lea r12, [r12 + 8]          ; layer pointers
     
 .forward_loop:
     test ebx, ebx
     jz .forward_done
     
-    mov rax, [r12]
+    mov rax, [rel r12]
     
     ; Check layer type
     cmp rax, 1                  ; ReLU marker
     je .apply_relu
     cmp rax, 2                  ; Softmax marker
     je .apply_softmax
+    cmp rax, 3                  ; Sigmoid marker
+    je .apply_sigmoid
     
     ; Linear layer
     mov rdi, rax
@@ -1422,6 +1454,13 @@ model_forward:
 .apply_softmax:
     mov rdi, r13
     call softmax_forward
+    
+    mov r13, rax
+    jmp .forward_next
+    
+.apply_sigmoid:
+    mov rdi, r13
+    call sigmoid_forward
     
     mov r13, rax
     
@@ -1503,7 +1542,7 @@ calculate_batch_accuracy:
     
     ; Get batch size
     mov rax, [r12 + 16]         ; shape
-    mov ecx, [rax]              ; batch_size
+    mov ecx, [rel rax]              ; batch_size
     mov r14d, ecx
     
     ; Get num_classes
@@ -1513,15 +1552,19 @@ calculate_batch_accuracy:
     xor ebx, ebx                ; correct_count = 0
     xor r8d, r8d                ; i = 0
     
-    mov r9, [r12]               ; logits data
-    mov r10, [r13]              ; targets data
+    mov r9, [rel r12]               ; logits data
+    mov r10, [rel r13]              ; targets data
+    
+    ; Check for binary classification (single output)
+    cmp r15d, 1
+    je .binary_acc_loop
     
 .acc_loop:
     cmp r8d, r14d
     jge .acc_done
     
     ; Find argmax for sample i
-    ; logits[i] starts at r9 + i * num_classes * 4 (assuming float32)
+    ; logits[rel i] starts at r9 + i * num_classes * 4 (assuming float32)
     mov eax, r8d
     imul eax, r15d
     shl eax, 2                  ; * 4 bytes
@@ -1529,7 +1572,7 @@ calculate_batch_accuracy:
     
     ; Find max index in this row
     xor ecx, ecx                ; max_idx = 0
-    movss xmm0, [rdi]           ; max_val
+    movss xmm0, [rel rdi]           ; max_val
     mov edx, 1                  ; j = 1
     
 .max_loop:
@@ -1551,7 +1594,7 @@ calculate_batch_accuracy:
     ; ecx is predicted class
     
     ; Get target class
-    ; targets[i] is at r10 + i * 4
+    ; targets[rel i] is at r10 + i * 4
     movss xmm2, [r10 + r8*4]
     cvttss2si eax, xmm2         ; convert float target to int
 
@@ -1564,6 +1607,42 @@ calculate_batch_accuracy:
 .next_sample:
     inc r8d
     jmp .acc_loop
+
+; Binary classification accuracy loop (output_size = 1)
+; Compare sigmoid output > 0.5 with target (0 or 1)
+.binary_acc_loop:
+    cmp r8d, r14d
+    jge .acc_done
+    
+    ; Get prediction: logits[rel i] (single value per sample)
+    movss xmm0, [r9 + r8*4]     ; logits[rel i]
+    
+    ; Get target: targets[rel i]
+    movss xmm1, [r10 + r8*4]    ; targets[rel i]
+    
+    ; Convert prediction to class: pred > 0.5 ? 1 : 0
+    mov eax, 0x3F000000         ; 0.5 in float
+    movd xmm2, eax
+    comiss xmm0, xmm2
+    ja .pred_class_1
+    xor ecx, ecx                ; predicted class = 0
+    jmp .binary_compare
+.pred_class_1:
+    mov ecx, 1                  ; predicted class = 1
+    
+.binary_compare:
+    ; Convert target to int class
+    cvttss2si eax, xmm1
+    
+    ; Compare
+    cmp ecx, eax
+    jne .binary_next
+    
+    inc ebx                     ; correct!
+    
+.binary_next:
+    inc r8d
+    jmp .binary_acc_loop
     
 .acc_done:
     mov eax, ebx
@@ -1608,11 +1687,11 @@ evaluate_model:
     
 .eval_loop:
     mov eax, [rbp - 68]
-    cmp eax, [r13]              ; num_samples
+    cmp eax, [rel r13]              ; num_samples
     jge .eval_done
     
     ; Calculate batch size (min of 32 and remaining samples)
-    mov ecx, [r13]
+    mov ecx, [rel r13]
     sub ecx, eax                ; remaining = num_samples - current
     cmp ecx, 32
     jle .use_remaining
@@ -1650,7 +1729,7 @@ evaluate_model:
     
     ; Calculate batch accuracy
     mov rdi, r15                ; output node
-    mov rdi, [rdi]              ; output tensor (logits)
+    mov rdi, [rel rdi]              ; output tensor (logits)
     mov rsi, [rbp - 56]         ; labels tensor
     call calculate_batch_accuracy
     
@@ -1712,7 +1791,7 @@ run_inference:
     
 .infer_loop:
     mov eax, [rbp - 68]
-    cmp eax, [r13]              ; num_samples
+    cmp eax, [rel r13]              ; num_samples
     jge .infer_summary
     
     ; Get sample
@@ -1736,12 +1815,12 @@ run_inference:
     mov r15, rax                ; output node
     
     ; Print result prefix
-    lea rdi, [msg_result]
+    lea rdi, [rel msg_result]
     call print_string
     
     ; Find argmax of output
     mov rdi, r15                ; output node
-    mov rdi, [rdi]              ; output tensor
+    mov rdi, [rel rdi]              ; output tensor
     call tensor_argmax
     mov rbx, rax                ; prediction
     
@@ -1754,11 +1833,11 @@ run_inference:
     jz .print_newline
     
     ; Print " | Target: "
-    lea rdi, [msg_loss]         ; reuse loss message for separator
+    lea rdi, [rel msg_loss]         ; reuse loss message for separator
     call print_string
     
     mov rax, [rbp - 56]
-    movss xmm0, [rax]           ; target value (float)
+    movss xmm0, [rel rax]           ; target value (float)
     cvttss2si eax, xmm0         ; target int
     
     mov rdi, rax
@@ -1770,7 +1849,7 @@ run_inference:
     inc dword [rbp - 60]        ; correct++
     
 .print_newline:
-    lea rdi, [msg_newline]
+    lea rdi, [rel msg_newline]
     call print_string
     
     inc dword [rbp - 64]        ; total++
@@ -1779,7 +1858,7 @@ run_inference:
     
 .infer_summary:
     ; Print accuracy
-    lea rdi, [msg_acc]
+    lea rdi, [rel msg_acc]
     call print_string
     
     cvtsi2ss xmm0, dword [rbp - 60]
@@ -1792,7 +1871,7 @@ run_inference:
     mov edi, 2
     call print_float
     
-    lea rdi, [msg_percent]
+    lea rdi, [rel msg_percent]
     call print_string
     
 .infer_done:
@@ -1823,10 +1902,10 @@ tensor_argmax:
     call tensor_get_size
     mov ecx, eax                ; size
     
-    mov rsi, [r12]              ; data pointer
+    mov rsi, [rel r12]              ; data pointer
     
     xor ebx, ebx                ; max_idx = 0
-    movss xmm0, [rsi]           ; max_val = data[0]
+    movss xmm0, [rel rsi]           ; max_val = data[0]
     mov edx, 1                  ; i = 1
     
 .argmax_loop:
@@ -1865,18 +1944,18 @@ run_gradient_checks:
     sub rsp, 96
     
     ; Print test header
-    lea rdi, [msg_test_header]
+    lea rdi, [rel msg_test_header]
     call print_string
     
     ; Test 1: Create a small tensor and verify basic operations
-    lea rdi, [msg_test1]
+    lea rdi, [rel msg_test1]
     call print_string
     
     ; Create a 2x3 tensor
-    mov qword [rsp], 2          ; shape[0]
+    mov qword [rel rsp], 2          ; shape[0]
     mov qword [rsp+8], 3        ; shape[1]
     mov rdi, 2                  ; ndim
-    lea rsi, [rsp]              ; shape
+    lea rsi, [rel rsp]              ; shape
     xor edx, edx                ; dtype = float32
     call tensor_create
     mov r12, rax
@@ -1896,17 +1975,17 @@ run_gradient_checks:
     cmp rax, 6                  ; 2*3 = 6
     jne .test1_fail
     
-    lea rdi, [msg_pass]
+    lea rdi, [rel msg_pass]
     call print_string
     jmp .test2
     
 .test1_fail:
-    lea rdi, [msg_fail]
+    lea rdi, [rel msg_fail]
     call print_string
     
 .test2:
     ; Test 2: Create linear layer and verify parameter count
-    lea rdi, [msg_test2]
+    lea rdi, [rel msg_test2]
     call print_string
     
     mov rdi, 4                  ; in_features
@@ -1919,21 +1998,21 @@ run_gradient_checks:
     jz .test2_fail
     
     ; Check n_params = 2 (weight + bias)
-    mov eax, [r13]
+    mov eax, [rel r13]
     cmp eax, 2
     jne .test2_fail
     
-    lea rdi, [msg_pass]
+    lea rdi, [rel msg_pass]
     call print_string
     jmp .test3
     
 .test2_fail:
-    lea rdi, [msg_fail]
+    lea rdi, [rel msg_fail]
     call print_string
     
 .test3:
     ; Test 3: Verify autograd node creation
-    lea rdi, [msg_test3]
+    lea rdi, [rel msg_test3]
     call print_string
     
     ; Create a node from tensor
@@ -1945,23 +2024,23 @@ run_gradient_checks:
     test r14, r14
     jz .test3_fail
     
-    lea rdi, [msg_pass]
+    lea rdi, [rel msg_pass]
     call print_string
     jmp .test4
     
 .test3_fail:
-    lea rdi, [msg_fail]
+    lea rdi, [rel msg_fail]
     call print_string
     
 .test4:
     ; Test 4: Math kernel (element-wise add with tensors)
-    lea rdi, [msg_test4]
+    lea rdi, [rel msg_test4]
     call print_string
     
     ; Create tensor a (1D, 8 elements)
-    mov qword [rsp], 8          ; shape[0] = 8
+    mov qword [rel rsp], 8          ; shape[0] = 8
     mov rdi, 1                  ; ndim = 1
-    lea rsi, [rsp]
+    lea rsi, [rel rsp]
     xor edx, edx                ; dtype = float32
     call tensor_create
     mov r15, rax
@@ -1976,9 +2055,9 @@ run_gradient_checks:
     call tensor_fill
     
     ; Create tensor b (1D, 8 elements)
-    mov qword [rsp], 8
+    mov qword [rel rsp], 8
     mov rdi, 1
-    lea rsi, [rsp]
+    lea rsi, [rel rsp]
     xor edx, edx
     call tensor_create
     mov rbx, rax
@@ -1993,9 +2072,9 @@ run_gradient_checks:
     call tensor_fill
     
     ; Create output tensor c
-    mov qword [rsp], 8
+    mov qword [rel rsp], 8
     mov rdi, 1
-    lea rsi, [rsp]
+    lea rsi, [rel rsp]
     xor edx, edx
     call tensor_create
     mov [rsp+16], rax
@@ -2010,22 +2089,22 @@ run_gradient_checks:
     
     ; Check result - first element should be 3.0
     mov rax, [rsp+16]           ; tensor c
-    mov rax, [rax]              ; c->data
-    mov eax, [rax]              ; c->data[0]
+    mov rax, [rel rax]              ; c->data
+    mov eax, [rel rax]              ; c->data[0]
     cmp eax, 0x40400000         ; 3.0f
     jne .test4_fail
     
-    lea rdi, [msg_pass]
+    lea rdi, [rel msg_pass]
     call print_string
     jmp .tests_done
     
 .test4_fail:
-    lea rdi, [msg_fail]
+    lea rdi, [rel msg_fail]
     call print_string
     
 .tests_done:
     ; Print summary
-    lea rdi, [msg_test_done]
+    lea rdi, [rel msg_test_done]
     call print_string
     
     ; Cleanup
@@ -2050,8 +2129,8 @@ print_timing:
     mov rbp, rsp
     
     ; Calculate elapsed time
-    mov rax, [end_time]
-    sub rax, [start_time]
+    mov rax, [rel end_time]
+    sub rax, [rel start_time]
     
     ; Convert nanoseconds to seconds
     mov rcx, 1000000000

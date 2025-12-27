@@ -1,6 +1,6 @@
 ; model_io.asm - Model Serialization and Deserialization
 ; Binary format for saving/loading trained models
-; Format: [magic][version][num_layers][layer_data...]
+; Format: [rel magic][rel version][rel num_layers][layer_data...]
 
 section .data
     ; Magic number for file format identification
@@ -99,25 +99,25 @@ model_save:
     js .open_error
     
     mov r14, rax                ; file descriptor
-    mov [current_fd], rax
+    mov [rel current_fd], rax
     
     ; Write magic number
-    lea rdi, [io_buffer]
-    mov rax, [MODEL_MAGIC]
-    mov [rdi], rax
+    lea rdi, [rel io_buffer]
+    mov rax, [rel MODEL_MAGIC]
+    mov [rel rdi], rax
     
     ; Write version
-    mov eax, [MODEL_VERSION]
+    mov eax, [rel MODEL_VERSION]
     mov [rdi + 8], eax
     
     ; Get number of layers from model structure
-    mov rax, [r12]              ; num_layers at offset 0
+    mov rax, [rel r12]              ; num_layers at offset 0
     mov [rdi + 12], eax
     
     ; Write header (16 bytes so far)
     mov rax, 1                  ; sys_write
     mov rdi, r14
-    lea rsi, [io_buffer]
+    lea rsi, [rel io_buffer]
     mov rdx, 16
     syscall
     
@@ -125,7 +125,7 @@ model_save:
     js .write_error
     
     ; Write each layer
-    mov r15, [r12]              ; num_layers
+    mov r15, [rel r12]              ; num_layers
     lea rbx, [r12 + 8]          ; pointer to first layer
     
 .write_layers_loop:
@@ -133,7 +133,7 @@ model_save:
     jz .write_done
     
     ; Get layer pointer
-    mov rdi, [rbx]
+    mov rdi, [rel rbx]
     call write_layer
     
     test rax, rax
@@ -153,13 +153,13 @@ model_save:
     jmp .cleanup
     
 .open_error:
-    lea rdi, [err_file_open]
+    lea rdi, [rel err_file_open]
     call print_error
     mov eax, -1
     jmp .cleanup
     
 .write_error:
-    lea rdi, [err_file_write]
+    lea rdi, [rel err_file_write]
     call print_error
     
     ; Close file
@@ -207,13 +207,13 @@ write_layer:
     jb .skip_marker
     
     ; Write layer type (for now just use 1 = Linear)
-    lea rdi, [io_buffer]
-    mov dword [rdi], LAYER_TYPE_LINEAR
+    lea rdi, [rel io_buffer]
+    mov dword [rel rdi], LAYER_TYPE_LINEAR
     mov dword [rdi + 4], 0      ; name_length = 0 (no name)
     
     mov rax, 1                  ; sys_write
-    mov rdi, [current_fd]
-    lea rsi, [io_buffer]
+    mov rdi, [rel current_fd]
+    lea rsi, [rel io_buffer]
     mov rdx, 8
     syscall
     
@@ -221,13 +221,13 @@ write_layer:
     js .layer_write_error
     
     ; Write number of tensors (n_params)
-    lea rdi, [io_buffer]
-    mov eax, [r12]              ; n_params at offset 0
-    mov [rdi], eax
+    lea rdi, [rel io_buffer]
+    mov eax, [rel r12]              ; n_params at offset 0
+    mov [rel rdi], eax
     
     mov rax, 1
-    mov rdi, [current_fd]
-    lea rsi, [io_buffer]
+    mov rdi, [rel current_fd]
+    lea rsi, [rel io_buffer]
     mov rdx, 4
     syscall
     
@@ -235,7 +235,7 @@ write_layer:
     js .layer_write_error
     
     ; Write each tensor from params array
-    mov r13d, [r12]             ; n_params
+    mov r13d, [rel r12]             ; n_params
     mov rbx, [r12 + 8]          ; params array (Tensor**)
     test rbx, rbx
     jz .layer_write_done
@@ -244,7 +244,7 @@ write_layer:
     test r13d, r13d
     jz .layer_write_done
     
-    mov rdi, [rbx]              ; params[i] = Tensor*
+    mov rdi, [rel rbx]              ; params[rel i] = Tensor*
     test rdi, rdi
     jz .skip_null_tensor
     call write_tensor_data
@@ -259,16 +259,16 @@ write_layer:
     
 .skip_marker:
     ; For activation markers, just write a marker layer type
-    lea rdi, [io_buffer]
+    lea rdi, [rel io_buffer]
     mov eax, r12d               ; The marker value becomes the type
     add eax, 9                  ; offset to get LAYER_TYPE_RELU=10, etc.
-    mov [rdi], eax
+    mov [rel rdi], eax
     mov dword [rdi + 4], 0      ; name_length
     mov dword [rdi + 8], 0      ; num_tensors
     
     mov rax, 1
-    mov rdi, [current_fd]
-    lea rsi, [io_buffer]
+    mov rdi, [rel current_fd]
+    lea rsi, [rel io_buffer]
     mov rdx, 12
     syscall
     
@@ -318,19 +318,19 @@ write_tensor_data:
     mov r13, rax                ; save ndim
     
     ; Write number of dimensions (as 4-byte integer for file format)
-    lea rdi, [io_buffer]
-    mov [rdi], eax              ; just lower 32 bits
+    lea rdi, [rel io_buffer]
+    mov [rel rdi], eax              ; just lower 32 bits
     
     ; Copy shape values from shape array pointer
     mov rsi, [r12 + 16]         ; shape pointer
-    lea rdi, [io_buffer + 4]
+    lea rdi, [rel io_buffer + 4]
     mov rcx, r13
     
 .copy_dims:
     test rcx, rcx
     jz .dims_done
-    mov rax, [rsi]              ; shape[i] is uint64_t
-    mov [rdi], eax              ; write as 32-bit
+    mov rax, [rel rsi]              ; shape[rel i] is uint64_t
+    mov [rel rdi], eax              ; write as 32-bit
     add rsi, 8
     add rdi, 4
     dec rcx
@@ -345,8 +345,8 @@ write_tensor_data:
     mov r14d, eax
     
     mov rax, 1                  ; sys_write
-    mov rdi, [current_fd]
-    lea rsi, [io_buffer]
+    mov rdi, [rel current_fd]
+    lea rsi, [rel io_buffer]
     mov edx, r14d
     syscall
     
@@ -361,8 +361,8 @@ write_tensor_data:
     ; Write tensor data
     ; Size in bytes = elements * 4 (float32)
     mov rax, 1
-    mov rdi, [current_fd]
-    mov rsi, [r12]              ; data pointer at offset 0
+    mov rdi, [rel current_fd]
+    mov rsi, [rel r12]              ; data pointer at offset 0
     mov rdx, r14
     shl rdx, 2                  ; * 4 for float32
     syscall
@@ -413,12 +413,12 @@ model_load:
     js .load_open_error
     
     mov r13, rax                ; file descriptor
-    mov [current_fd], rax
+    mov [rel current_fd], rax
     
     ; Read header
     mov rax, 0                  ; sys_read
     mov rdi, r13
-    lea rsi, [io_buffer]
+    lea rsi, [rel io_buffer]
     mov rdx, 16
     syscall
     
@@ -426,14 +426,14 @@ model_load:
     jne .load_read_error
     
     ; Verify magic number
-    lea rdi, [io_buffer]
-    mov rax, [rdi]
-    cmp rax, [MODEL_MAGIC]
+    lea rdi, [rel io_buffer]
+    mov rax, [rel rdi]
+    cmp rax, [rel MODEL_MAGIC]
     jne .load_magic_error
     
     ; Verify version
     mov eax, [rdi + 8]
-    cmp eax, [MODEL_VERSION]
+    cmp eax, [rel MODEL_VERSION]
     ja .load_version_error
     
     ; Get number of layers
@@ -451,11 +451,11 @@ model_load:
     jz .load_alloc_error
     
     mov r15, rax                ; model pointer
-    mov [r15], r14d             ; store num_layers
+    mov [rel r15], r14d             ; store num_layers
     
     ; Load each layer
     lea rbx, [r15 + 8]          ; pointer to layer pointers array
-    mov r14d, [r15]             ; num_layers
+    mov r14d, [rel r15]             ; num_layers
     
 .load_layers_loop:
     test r14d, r14d
@@ -466,7 +466,7 @@ model_load:
     test rax, rax
     jz .load_layer_error
     
-    mov [rbx], rax              ; store layer pointer
+    mov [rel rbx], rax              ; store layer pointer
     add rbx, 8
     dec r14d
     jmp .load_layers_loop
@@ -481,23 +481,23 @@ model_load:
     jmp .load_cleanup
     
 .load_open_error:
-    lea rdi, [err_file_open]
+    lea rdi, [rel err_file_open]
     call print_error
     xor eax, eax
     jmp .load_cleanup
     
 .load_read_error:
-    lea rdi, [err_file_read]
+    lea rdi, [rel err_file_read]
     call print_error
     jmp .load_close_error
     
 .load_magic_error:
-    lea rdi, [err_magic]
+    lea rdi, [rel err_magic]
     call print_error
     jmp .load_close_error
     
 .load_version_error:
-    lea rdi, [err_version]
+    lea rdi, [rel err_version]
     call print_error
     jmp .load_close_error
     
@@ -533,8 +533,8 @@ read_layer:
     
     ; Read layer header (type + name_length)
     mov rax, 0                  ; sys_read
-    mov rdi, [current_fd]
-    lea rsi, [io_buffer]
+    mov rdi, [rel current_fd]
+    lea rsi, [rel io_buffer]
     mov rdx, 8
     syscall
     
@@ -552,9 +552,9 @@ read_layer:
     mov r12, rax                ; layer pointer
     
     ; Copy type and name_length
-    lea rsi, [io_buffer]
-    mov eax, [rsi]
-    mov [r12], eax              ; layer_type
+    lea rsi, [rel io_buffer]
+    mov eax, [rel rsi]
+    mov [rel r12], eax              ; layer_type
     mov eax, [rsi + 4]
     mov [r12 + 4], eax          ; name_length
     mov r13d, eax               ; save name_length
@@ -570,7 +570,7 @@ read_layer:
     mov [r12 + 8], rax          ; name pointer
     
     mov rax, 0                  ; sys_read
-    mov rdi, [current_fd]
+    mov rdi, [rel current_fd]
     mov rsi, [r12 + 8]
     mov edx, r13d
     syscall
@@ -581,21 +581,21 @@ read_layer:
     ; Add null terminator
     mov rdi, [r12 + 8]
     add rdi, r13
-    mov byte [rdi], 0
+    mov byte [rel rdi], 0
     
 .skip_read_name:
     ; Read number of tensors
     mov rax, 0
-    mov rdi, [current_fd]
-    lea rsi, [io_buffer]
+    mov rdi, [rel current_fd]
+    lea rsi, [rel io_buffer]
     mov rdx, 4
     syscall
     
     cmp rax, 4
     jne .read_layer_error
     
-    lea rsi, [io_buffer]
-    mov eax, [rsi]
+    lea rsi, [rel io_buffer]
+    mov eax, [rel rsi]
     mov [r12 + 16], eax         ; num_tensors
     mov r14d, eax
     
@@ -618,7 +618,7 @@ read_layer:
     test rax, rax
     jz .read_layer_error
     
-    mov [rbx], rax
+    mov [rel rbx], rax
     add rbx, 8
     dec r14d
     jmp .read_tensors_loop
@@ -654,16 +654,16 @@ read_tensor_data:
     
     ; Read ndim first
     mov rax, 0
-    mov rdi, [current_fd]
-    lea rsi, [io_buffer]
+    mov rdi, [rel current_fd]
+    lea rsi, [rel io_buffer]
     mov rdx, 4
     syscall
     
     cmp rax, 4
     jne .read_tensor_error
     
-    lea rsi, [io_buffer]
-    mov r12d, [rsi]             ; ndim
+    lea rsi, [rel io_buffer]
+    mov r12d, [rel rsi]             ; ndim
     
     ; Read dimensions
     mov eax, r12d
@@ -671,8 +671,8 @@ read_tensor_data:
     mov r13d, eax               ; bytes to read
     
     mov rax, 0
-    mov rdi, [current_fd]
-    lea rsi, [io_buffer]
+    mov rdi, [rel current_fd]
+    lea rsi, [rel io_buffer]
     mov edx, r13d
     syscall
     
@@ -682,13 +682,13 @@ read_tensor_data:
     ; Calculate total elements
     xor r14d, r14d
     mov r14d, 1                 ; accumulator
-    lea rsi, [io_buffer]
+    lea rsi, [rel io_buffer]
     mov ecx, r12d
     
 .calc_size:
     test ecx, ecx
     jz .size_done
-    mov eax, [rsi]
+    mov eax, [rel rsi]
     imul r14d, eax
     add rsi, 4
     dec ecx
@@ -711,14 +711,14 @@ read_tensor_data:
     
     ; Copy dimensions
     lea rdi, [r15 + 12]
-    lea rsi, [io_buffer]
+    lea rsi, [rel io_buffer]
     mov ecx, r12d
     
 .copy_read_dims:
     test ecx, ecx
     jz .dims_read_done
-    mov eax, [rsi]
-    mov [rdi], eax
+    mov eax, [rel rsi]
+    mov [rel rdi], eax
     add rsi, 4
     add rdi, 4
     dec ecx
@@ -738,7 +738,7 @@ read_tensor_data:
     ; Align to 32 bytes
     add rax, 31
     and rax, ~31
-    mov [r15], rax              ; data pointer
+    mov [rel r15], rax              ; data pointer
     
     ; Read tensor data
     mov eax, r14d
@@ -746,8 +746,8 @@ read_tensor_data:
     mov r13d, eax               ; bytes to read
     
     mov rax, 0
-    mov rdi, [current_fd]
-    mov rsi, [r15]
+    mov rdi, [rel current_fd]
+    mov rsi, [rel r15]
     mov edx, r13d
     syscall
     
@@ -767,21 +767,21 @@ read_tensor_data:
     mov ecx, r12d
     dec ecx
     lea rdx, [rdi + rcx*4]
-    mov dword [rdx], 1
+    mov dword [rel rdx], 1
     
     ; Calculate remaining strides
     dec ecx
     js .strides_done
     
 .calc_strides:
-    ; strides[i] = strides[i+1] * dims[i+1]
-    lea rdx, [rdi + rcx*4]      ; &strides[i]
+    ; strides[rel i] = strides[i+1] * dims[i+1]
+    lea rdx, [rdi + rcx*4]      ; &strides[rel i]
     mov eax, [rdx + 4]          ; strides[i+1]
     
     lea r8, [rsi + rcx*4]
     mov r9d, [r8 + 4]           ; dims[i+1]
     imul eax, r9d
-    mov [rdx], eax
+    mov [rel rdx], eax
     
     dec ecx
     jns .calc_strides
@@ -837,17 +837,17 @@ model_save_checkpoint:
     js .ckpt_open_error
     
     mov rbx, rax                ; fd
-    mov [current_fd], rax
+    mov [rel current_fd], rax
     
     ; Write checkpoint header
-    lea rdi, [io_buffer]
+    lea rdi, [rel io_buffer]
     mov rax, 0x54504B43         ; "CKPT"
-    mov [rdi], eax
+    mov [rel rdi], eax
     mov [rdi + 4], r15d         ; epoch
     
     mov rax, 1
     mov rdi, rbx
-    lea rsi, [io_buffer]
+    lea rsi, [rel io_buffer]
     mov rdx, 8
     syscall
     
@@ -868,9 +868,9 @@ model_save_checkpoint:
     test r13, r13
     jz .no_optimizer
     
-    lea rdi, [io_buffer]
-    mov eax, [r13]              ; optimizer type
-    mov [rdi], eax
+    lea rdi, [rel io_buffer]
+    mov eax, [rel r13]              ; optimizer type
+    mov [rel rdi], eax
     mov eax, [r13 + 4]          ; num_params
     mov [rdi + 4], eax
     movss xmm0, [r13 + 8]       ; learning_rate
@@ -878,7 +878,7 @@ model_save_checkpoint:
     
     mov rax, 1
     mov rdi, rbx
-    lea rsi, [io_buffer]
+    lea rsi, [rel io_buffer]
     mov rdx, 12
     syscall
     
@@ -935,12 +935,12 @@ model_load_checkpoint:
     js .ckpt_load_error
     
     mov rbx, rax
-    mov [current_fd], rax
+    mov [rel current_fd], rax
     
     ; Read checkpoint header
     mov rax, 0
     mov rdi, rbx
-    lea rsi, [io_buffer]
+    lea rsi, [rel io_buffer]
     mov rdx, 8
     syscall
     
@@ -948,8 +948,8 @@ model_load_checkpoint:
     jne .ckpt_load_error
     
     ; Verify magic
-    lea rsi, [io_buffer]
-    mov eax, [rsi]
+    lea rsi, [rel io_buffer]
+    mov eax, [rel rsi]
     cmp eax, 0x54504B43         ; "CKPT"
     jne .ckpt_load_error
     
@@ -957,7 +957,7 @@ model_load_checkpoint:
     mov eax, [rsi + 4]
     test r13, r13
     jz .skip_epoch_store
-    mov [r13], eax
+    mov [rel r13], eax
     
 .skip_epoch_store:
     ; Load model
@@ -1009,7 +1009,7 @@ tensor_save:
     test rax, rax
     js .tensor_save_error
     
-    mov [current_fd], rax
+    mov [rel current_fd], rax
     push rax
     
     mov rdi, r12
@@ -1057,7 +1057,7 @@ tensor_load:
     test rax, rax
     js .tensor_load_error
     
-    mov [current_fd], rax
+    mov [rel current_fd], rax
     push rax
     
     call read_tensor_data

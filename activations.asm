@@ -145,7 +145,7 @@ node_relu:
     mov rdi, 8
     call mem_alloc
     mov [rbx + NODE_PARENTS], rax
-    mov [rax], r12
+    mov [rel rax], r12
     
     mov rax, rbx
     
@@ -184,7 +184,7 @@ relu_backward:
     mov r12, rdi                    ; self
     mov r13, [r12 + NODE_GRAD]      ; dL/dout
     mov r14, [r12 + NODE_PARENTS]
-    mov r15, [r14]                  ; parent x
+    mov r15, [rel r14]                  ; parent x
     
     mov rax, [r15 + NODE_GRAD]
     test rax, rax
@@ -220,7 +220,7 @@ relu_backward:
     cmp r8, rcx
     jge .done
     
-    movsd xmm0, [rdx + r8*8]        ; x[i]
+    movsd xmm0, [rdx + r8*8]        ; x[rel i]
     xorpd xmm1, xmm1
     ucomisd xmm0, xmm1
     jbe .relu_bwd_f64_zero
@@ -385,7 +385,7 @@ node_sigmoid:
     mov rdi, 8
     call mem_alloc
     mov [rbx + NODE_PARENTS], rax
-    mov [rax], r12
+    mov [rel rax], r12
     
     mov rax, rbx
     
@@ -427,7 +427,7 @@ sigmoid_backward:
     mov rax, [r12 + NODE_VALUE]     ; sigmoid output
     mov r14, [rax + TENSOR_DATA]    ; sigmoid values
     mov r15, [r12 + NODE_PARENTS]
-    mov r15, [r15]                  ; parent x
+    mov r15, [rel r15]                  ; parent x
     
     mov rax, [r15 + NODE_GRAD]
     test rax, rax
@@ -598,7 +598,7 @@ node_tanh:
     mov rdi, 8
     call mem_alloc
     mov [rbx + NODE_PARENTS], rax
-    mov [rax], r12
+    mov [rel rax], r12
     
     mov rax, rbx
     
@@ -639,7 +639,7 @@ tanh_backward:
     mov rax, [r12 + NODE_VALUE]
     mov r14, [rax + TENSOR_DATA]    ; tanh values
     mov r15, [r12 + NODE_PARENTS]
-    mov r15, [r15]
+    mov r15, [rel r15]
     
     mov rax, [r15 + NODE_GRAD]
     test rax, rax
@@ -727,7 +727,7 @@ node_softmax:
     sub rsp, 40
     
     mov r12, rdi                    ; input node
-    mov [rsp], rsi                  ; axis
+    mov [rel rsp], rsi                  ; axis
     
     mov rax, [r12 + NODE_VALUE]
     mov rdi, [rax + TENSOR_NDIM]
@@ -742,7 +742,7 @@ node_softmax:
     ; and softmax along axis 1
     mov rax, [r12 + NODE_VALUE]
     mov rcx, [rax + TENSOR_SHAPE]
-    mov r14, [rcx]                  ; batch_size
+    mov r14, [rel rcx]                  ; batch_size
     mov r15, [rcx + 8]              ; num_classes
     
     mov rdi, [r13 + TENSOR_DATA]
@@ -770,7 +770,7 @@ node_softmax:
     mov rsi, [rsp+24]
     add rsi, rcx                    ; &in[batch, 0]
     
-    movsd xmm0, [rsi]               ; max = in[0]
+    movsd xmm0, [rel rsi]               ; max = in[0]
     mov r8, 1
 .find_max_f64:
     cmp r8, r15
@@ -807,7 +807,7 @@ node_softmax:
     pop rsi
     pop rdi
     
-    movsd [rdi + r8*8], xmm0        ; out[i] = exp(x - max)
+    movsd [rdi + r8*8], xmm0        ; out[rel i] = exp(x - max)
     movsd xmm2, [rsp+40]            ; reload sum
     addsd xmm2, xmm0                ; sum += exp
     movsd [rsp+40], xmm2            ; save sum back
@@ -843,7 +843,7 @@ node_softmax:
     mov rsi, [rsp+24]
     add rsi, rcx
     
-    movss xmm0, [rsi]
+    movss xmm0, [rel rsi]
     mov r8, 1
 .find_max_f32:
     cmp r8, r15
@@ -920,7 +920,7 @@ node_softmax:
     mov rdi, 8
     call mem_alloc
     mov [rbx + NODE_PARENTS], rax
-    mov [rax], r12
+    mov [rel rax], r12
     
     mov rax, rbx
     
@@ -964,7 +964,7 @@ softmax_backward:
     mov rax, [r12 + NODE_VALUE]
     mov r14, [rax + TENSOR_DATA]    ; softmax output (y)
     mov r15, [r12 + NODE_PARENTS]
-    mov r15, [r15]                  ; parent x
+    mov r15, [rel r15]                  ; parent x
     
     mov rax, [r15 + NODE_GRAD]
     test rax, rax
@@ -975,8 +975,8 @@ softmax_backward:
     ; Get shape (assume 2D)
     mov rax, [r15 + NODE_VALUE]
     mov rax, [rax + TENSOR_SHAPE]
-    mov rcx, [rax]                  ; batch_size
-    mov [rsp], rcx
+    mov rcx, [rel rax]                  ; batch_size
+    mov [rel rsp], rcx
     mov rcx, [rax + 8]              ; num_classes
     mov [rsp+8], rcx
     
@@ -993,7 +993,7 @@ softmax_backward:
     ; float64: For each batch
     xor r8, r8                      ; batch index
 .softmax_bwd_f64_batch:
-    cmp r8, [rsp]
+    cmp r8, [rel rsp]
     jge .done
     
     mov rax, r8
@@ -1060,7 +1060,7 @@ softmax_backward:
     ; Similar implementation for float32
     xor r8, r8
 .softmax_bwd_f32_batch:
-    cmp r8, [rsp]
+    cmp r8, [rel rsp]
     jge .done
     
     mov rax, r8

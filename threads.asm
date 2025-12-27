@@ -31,9 +31,9 @@ section .data
     parallel_func_ptr:  dq 0
     
     ; Messages
-    msg_pool_init:      db "[THREADS] Thread pool initialized with %d workers", 10, 0
-    msg_pool_shutdown:  db "[THREADS] Thread pool shutdown", 10, 0
-    msg_task_submit:    db "[THREADS] Task submitted", 10, 0
+    msg_pool_init:      db "[rel THREADS] Thread pool initialized with %d workers", 10, 0
+    msg_pool_shutdown:  db "[rel THREADS] Thread pool shutdown", 10, 0
+    msg_task_submit:    db "[rel THREADS] Task submitted", 10, 0
 
 section .bss
     align 8
@@ -87,7 +87,7 @@ get_num_cpus:
     
     ; sysconf(_SC_NPROCESSORS_ONLN) = 84
     mov edi, 84
-    call sysconf
+    call sysconf wrt ..plt
     
     ; Ensure at least 1
     cmp eax, 1
@@ -115,7 +115,7 @@ thread_pool_init:
     sub rsp, 24
     
     ; Check if already initialized
-    cmp dword [pool_initialized], 1
+    cmp dword [rel pool_initialized], 1
     je .already_init
     
     ; Determine number of workers
@@ -134,35 +134,35 @@ thread_pool_init:
     mov r12d, MAX_THREADS
     
 .count_ok:
-    mov [num_workers], r12d
+    mov [rel num_workers], r12d
     
     ; Initialize mutex
-    lea rdi, [mutex_storage]
+    lea rdi, [rel mutex_storage]
     xor esi, esi                ; NULL for default attributes
-    call pthread_mutex_init
+    call pthread_mutex_init wrt ..plt
     test eax, eax
     jnz .mutex_fail
     
     ; Initialize condition variable
-    lea rdi, [cond_storage]
+    lea rdi, [rel cond_storage]
     xor esi, esi
-    call pthread_cond_init
+    call pthread_cond_init wrt ..plt
     test eax, eax
     jnz .cond_fail
     
     ; Initialize done condition
-    lea rdi, [done_cond_storage]
+    lea rdi, [rel done_cond_storage]
     xor esi, esi
-    call pthread_cond_init
+    call pthread_cond_init wrt ..plt
     test eax, eax
     jnz .done_cond_fail
     
     ; Reset queue
-    mov qword [queue_head], 0
-    mov qword [queue_tail], 0
-    mov qword [queue_count], 0
-    mov qword [active_tasks], 0
-    mov dword [shutdown_flag], 0
+    mov qword [rel queue_head], 0
+    mov qword [rel queue_tail], 0
+    mov qword [rel queue_count], 0
+    mov qword [rel active_tasks], 0
+    mov dword [rel shutdown_flag], 0
     
     ; Create worker threads
     xor r13d, r13d              ; Thread index
@@ -171,11 +171,12 @@ thread_pool_init:
     cmp r13d, r12d
     jge .threads_created
     
-    lea rdi, [worker_threads + r13*8]  ; &threads[i]
+    lea rdi, [rel worker_threads]
+    lea rdi, [rdi + r13*8]  ; &threads[i]
     xor esi, esi                        ; NULL attributes
-    lea rdx, [worker_routine]           ; Start routine
+    lea rdx, [rel worker_routine]           ; Start routine
     mov rcx, r13                        ; Thread ID as arg
-    call pthread_create
+    call pthread_create wrt ..plt
     test eax, eax
     jnz .thread_fail
     
@@ -183,31 +184,31 @@ thread_pool_init:
     jmp .create_loop
     
 .threads_created:
-    mov dword [pool_initialized], 1
+    mov dword [rel pool_initialized], 1
     
     ; Print info
-    lea rdi, [msg_pool_init]
+    lea rdi, [rel msg_pool_init]
     mov esi, r12d
     xor eax, eax
-    call printf
+    call printf wrt ..plt
     
     xor eax, eax
     jmp .done
     
 .thread_fail:
     ; Cleanup created threads
-    mov dword [shutdown_flag], 1
-    lea rdi, [cond_storage]
-    call pthread_cond_broadcast
+    mov dword [rel shutdown_flag], 1
+    lea rdi, [rel cond_storage]
+    call pthread_cond_broadcast wrt ..plt
     ; Fall through to cleanup
     
 .done_cond_fail:
-    lea rdi, [cond_storage]
-    call pthread_cond_destroy
+    lea rdi, [rel cond_storage]
+    call pthread_cond_destroy wrt ..plt
     
 .cond_fail:
-    lea rdi, [mutex_storage]
-    call pthread_mutex_destroy
+    lea rdi, [rel mutex_storage]
+    call pthread_mutex_destroy wrt ..plt
     
 .mutex_fail:
     mov eax, -1
@@ -244,37 +245,37 @@ worker_routine:
     
 .worker_loop:
     ; Lock mutex
-    lea rdi, [mutex_storage]
-    call pthread_mutex_lock
+    lea rdi, [rel mutex_storage]
+    call pthread_mutex_lock wrt ..plt
     
     ; Wait for work
 .wait_work:
     ; Check shutdown
-    cmp dword [shutdown_flag], 1
+    cmp dword [rel shutdown_flag], 1
     je .worker_shutdown
     
     ; Check for work
-    cmp qword [queue_count], 0
+    cmp qword [rel queue_count], 0
     jg .has_work
     
     ; Wait on condition
-    lea rdi, [cond_storage]
-    lea rsi, [mutex_storage]
-    call pthread_cond_wait
+    lea rdi, [rel cond_storage]
+    lea rsi, [rel mutex_storage]
+    call pthread_cond_wait wrt ..plt
     jmp .wait_work
     
 .has_work:
     ; Dequeue work item
-    mov rax, [queue_head]
-    lea rbx, [work_queue]
+    mov rax, [rel queue_head]
+    lea rbx, [rel work_queue]
     lea rbx, [rbx + rax*8]      ; Pointer to work item
     
     ; Load work item: func, arg1, arg2, arg3
-    mov r13, [rbx]              ; func
+    mov r13, [rel rbx]              ; func
     mov r14, [rbx + 8]          ; arg1
     mov r15, [rbx + 16]         ; arg2
     mov rcx, [rbx + 24]         ; arg3
-    mov [rsp], rcx              ; Save arg3
+    mov [rel rsp], rcx              ; Save arg3
     
     ; Update head
     inc rax
@@ -282,48 +283,48 @@ worker_routine:
     jl .no_wrap
     xor eax, eax
 .no_wrap:
-    mov [queue_head], rax
-    dec qword [queue_count]
+    mov [rel queue_head], rax
+    dec qword [rel queue_count]
     
     ; Increment active tasks
-    inc qword [active_tasks]
+    inc qword [rel active_tasks]
     
     ; Unlock mutex
-    lea rdi, [mutex_storage]
-    call pthread_mutex_unlock
+    lea rdi, [rel mutex_storage]
+    call pthread_mutex_unlock wrt ..plt
     
     ; Execute work
     mov rdi, r14                ; arg1
     mov rsi, r15                ; arg2
-    mov rdx, [rsp]              ; arg3
+    mov rdx, [rel rsp]              ; arg3
     call r13
     
     ; Lock mutex
-    lea rdi, [mutex_storage]
-    call pthread_mutex_lock
+    lea rdi, [rel mutex_storage]
+    call pthread_mutex_lock wrt ..plt
     
     ; Decrement active tasks
-    dec qword [active_tasks]
+    dec qword [rel active_tasks]
     
     ; Signal if all done
-    cmp qword [active_tasks], 0
+    cmp qword [rel active_tasks], 0
     jne .not_done
-    cmp qword [queue_count], 0
+    cmp qword [rel queue_count], 0
     jne .not_done
     
-    lea rdi, [done_cond_storage]
-    call pthread_cond_broadcast
+    lea rdi, [rel done_cond_storage]
+    call pthread_cond_broadcast wrt ..plt
     
 .not_done:
     ; Unlock mutex
-    lea rdi, [mutex_storage]
-    call pthread_mutex_unlock
+    lea rdi, [rel mutex_storage]
+    call pthread_mutex_unlock wrt ..plt
     
     jmp .worker_loop
     
 .worker_shutdown:
-    lea rdi, [mutex_storage]
-    call pthread_mutex_unlock
+    lea rdi, [rel mutex_storage]
+    call pthread_mutex_unlock wrt ..plt
     
     xor eax, eax
     add rsp, 24
@@ -361,19 +362,19 @@ thread_pool_submit:
     mov r15, rcx                ; arg3
     
     ; Lock mutex
-    lea rdi, [mutex_storage]
-    call pthread_mutex_lock
+    lea rdi, [rel mutex_storage]
+    call pthread_mutex_lock wrt ..plt
     
     ; Check if queue full
-    cmp qword [queue_count], WORK_QUEUE_SIZE * 4
+    cmp qword [rel queue_count], WORK_QUEUE_SIZE * 4
     jge .queue_full
     
     ; Enqueue work item
-    mov rax, [queue_tail]
-    lea rbx, [work_queue]
+    mov rax, [rel queue_tail]
+    lea rbx, [rel work_queue]
     lea rbx, [rbx + rax*8]
     
-    mov [rbx], r12              ; func
+    mov [rel rbx], r12              ; func
     mov [rbx + 8], r13          ; arg1
     mov [rbx + 16], r14         ; arg2
     mov [rbx + 24], r15         ; arg3
@@ -384,23 +385,23 @@ thread_pool_submit:
     jl .no_wrap
     xor eax, eax
 .no_wrap:
-    mov [queue_tail], rax
-    inc qword [queue_count]
+    mov [rel queue_tail], rax
+    inc qword [rel queue_count]
     
     ; Signal worker
-    lea rdi, [cond_storage]
-    call pthread_cond_signal
+    lea rdi, [rel cond_storage]
+    call pthread_cond_signal wrt ..plt
     
     ; Unlock mutex
-    lea rdi, [mutex_storage]
-    call pthread_mutex_unlock
+    lea rdi, [rel mutex_storage]
+    call pthread_mutex_unlock wrt ..plt
     
     xor eax, eax
     jmp .done
     
 .queue_full:
-    lea rdi, [mutex_storage]
-    call pthread_mutex_unlock
+    lea rdi, [rel mutex_storage]
+    call pthread_mutex_unlock wrt ..plt
     mov eax, -1
     
 .done:
@@ -422,27 +423,27 @@ thread_pool_wait:
     sub rsp, 16
     
     ; Lock mutex
-    lea rdi, [mutex_storage]
-    call pthread_mutex_lock
+    lea rdi, [rel mutex_storage]
+    call pthread_mutex_lock wrt ..plt
     
 .wait_loop:
     ; Check if all done
-    cmp qword [queue_count], 0
+    cmp qword [rel queue_count], 0
     jne .not_done
-    cmp qword [active_tasks], 0
+    cmp qword [rel active_tasks], 0
     je .all_done
     
 .not_done:
     ; Wait on done condition
-    lea rdi, [done_cond_storage]
-    lea rsi, [mutex_storage]
-    call pthread_cond_wait
+    lea rdi, [rel done_cond_storage]
+    lea rsi, [rel mutex_storage]
+    call pthread_cond_wait wrt ..plt
     jmp .wait_loop
     
 .all_done:
     ; Unlock mutex
-    lea rdi, [mutex_storage]
-    call pthread_mutex_unlock
+    lea rdi, [rel mutex_storage]
+    call pthread_mutex_unlock wrt ..plt
     
     add rsp, 16
     pop rbp
@@ -458,53 +459,54 @@ thread_pool_shutdown:
     push r12
     sub rsp, 16
     
-    cmp dword [pool_initialized], 0
+    cmp dword [rel pool_initialized], 0
     je .not_init
     
     ; Lock and set shutdown flag
-    lea rdi, [mutex_storage]
-    call pthread_mutex_lock
+    lea rdi, [rel mutex_storage]
+    call pthread_mutex_lock wrt ..plt
     
-    mov dword [shutdown_flag], 1
+    mov dword [rel shutdown_flag], 1
     
     ; Wake all workers
-    lea rdi, [cond_storage]
-    call pthread_cond_broadcast
+    lea rdi, [rel cond_storage]
+    call pthread_cond_broadcast wrt ..plt
     
     ; Unlock
-    lea rdi, [mutex_storage]
-    call pthread_mutex_unlock
+    lea rdi, [rel mutex_storage]
+    call pthread_mutex_unlock wrt ..plt
     
     ; Join all threads
     xor r12d, r12d
     
 .join_loop:
-    cmp r12d, [num_workers]
+    cmp r12d, [rel num_workers]
     jge .joined
     
-    mov rdi, [worker_threads + r12*8]
+    lea rax, [rel worker_threads]
+    mov rdi, [rax + r12*8]
     xor esi, esi
-    call pthread_join
+    call pthread_join wrt ..plt
     
     inc r12d
     jmp .join_loop
     
 .joined:
     ; Destroy sync primitives
-    lea rdi, [done_cond_storage]
-    call pthread_cond_destroy
+    lea rdi, [rel done_cond_storage]
+    call pthread_cond_destroy wrt ..plt
     
-    lea rdi, [cond_storage]
-    call pthread_cond_destroy
+    lea rdi, [rel cond_storage]
+    call pthread_cond_destroy wrt ..plt
     
-    lea rdi, [mutex_storage]
-    call pthread_mutex_destroy
+    lea rdi, [rel mutex_storage]
+    call pthread_mutex_destroy wrt ..plt
     
-    mov dword [pool_initialized], 0
+    mov dword [rel pool_initialized], 0
     
-    lea rdi, [msg_pool_shutdown]
+    lea rdi, [rel msg_pool_shutdown]
     xor eax, eax
-    call printf
+    call printf wrt ..plt
     
 .not_init:
     add rsp, 16
@@ -537,7 +539,7 @@ parallel_for:
     mov r15, rcx                ; arg
     
     ; Ensure pool is initialized
-    cmp dword [pool_initialized], 0
+    cmp dword [rel pool_initialized], 0
     jne .pool_ready
     
     xor edi, edi                ; Auto-detect threads
@@ -549,7 +551,7 @@ parallel_for:
     sub rax, r13                ; total = end - start
     
     xor edx, edx
-    mov ecx, [num_workers]
+    mov ecx, [rel num_workers]
     div rcx                     ; chunk = total / num_workers
     mov rbx, rax                ; chunk size
     
@@ -573,7 +575,7 @@ parallel_for:
     mov rax, r14
     
 .chunk_ok:
-    mov [rsp], rcx              ; Save current
+    mov [rel rsp], rcx              ; Save current
     mov [rsp + 8], rax          ; Save chunk_end
     
     ; Submit task
@@ -623,15 +625,15 @@ parallel_map:
     mov r15, rcx                ; count
     
     ; Store context for worker
-    mov [rsp], r12
+    mov [rel rsp], r12
     mov [rsp + 8], r13
     mov [rsp + 16], r14
     
     ; Use parallel_for with map_worker
-    lea rdi, [map_worker]
+    lea rdi, [rel map_worker]
     xor esi, esi                ; start = 0
     mov rdx, r15                ; end = count
-    lea rcx, [rsp]              ; context
+    lea rcx, [rel rsp]              ; context
     call parallel_for
     
     add rsp, 40
@@ -658,7 +660,7 @@ map_worker:
     mov r14, rdx                ; context
     
     ; Load context
-    mov r15, [r14]              ; func
+    mov r15, [rel r14]              ; func
     mov rbx, [r14 + 8]          ; dst
     mov rcx, [r14 + 16]         ; src
     
@@ -667,7 +669,7 @@ map_worker:
     cmp r12, r13
     jge .map_done
     
-    ; Call func(src[i])
+    ; Call func(src[rel i])
     movss xmm0, [rcx + r12*4]
     push rcx
     call r15

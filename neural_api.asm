@@ -1,0 +1,1512 @@
+; =============================================================================
+; neural_api.asm - C-Compatible API for Neural Assembly Framework
+; =============================================================================
+; This module provides exported C-callable functions with proper error handling
+; and return codes for use with Python ctypes, C programs, and other FFI.
+; =============================================================================
+
+section .data
+    align 8
+    
+    ; Version string
+    version_str:        db "Neural Assembly Framework v1.0", 0
+    
+    ; Initialization flag
+    initialized:        dd 0
+    
+    ; SIMD level names
+    simd_name_scalar:   db "Scalar (no SIMD)", 0
+    simd_name_sse2:     db "SSE2", 0
+    simd_name_avx:      db "AVX", 0
+    simd_name_avx2:     db "AVX2", 0
+    simd_name_avx512:   db "AVX-512", 0
+    
+    ; Error code constants (matching neural_api.h)
+    NEURAL_OK                   equ 0
+    NEURAL_ERR_NULL_POINTER     equ 1
+    NEURAL_ERR_OUT_OF_MEMORY    equ 2
+    NEURAL_ERR_INVALID_ARGUMENT equ 3
+    NEURAL_ERR_SHAPE_MISMATCH   equ 4
+    NEURAL_ERR_DTYPE_MISMATCH   equ 5
+    NEURAL_ERR_FILE_NOT_FOUND   equ 6
+    NEURAL_ERR_FILE_READ        equ 7
+    NEURAL_ERR_FILE_WRITE       equ 8
+    NEURAL_ERR_PARSE_ERROR      equ 9
+    NEURAL_ERR_INVALID_CONFIG   equ 10
+    NEURAL_ERR_TENSOR_TOO_LARGE equ 11
+    NEURAL_ERR_INVALID_DTYPE    equ 12
+    NEURAL_ERR_DIM_MISMATCH     equ 13
+    NEURAL_ERR_NOT_IMPLEMENTED  equ 14
+    NEURAL_ERR_INTERNAL         equ 15
+
+section .bss
+    align 8
+    last_error:         resd 1
+
+section .text
+
+; External functions from other modules
+extern mem_init
+extern mem_alloc
+extern mem_alloc_aligned
+extern mem_free
+extern mem_zero
+extern mem_copy
+
+extern tensor_create
+extern tensor_free
+extern tensor_zeros
+extern tensor_numel
+extern tensor_fill
+extern tensor_copy
+extern tensor_reshape
+extern tensor_data_size
+
+extern error_set
+extern error_get
+extern error_clear
+extern error_get_message
+
+extern ew_add
+extern ew_sub
+extern ew_mul
+extern ew_div
+extern matmul
+
+extern relu_forward
+extern sigmoid_forward
+extern softmax_forward
+extern tanh_forward
+
+; Note: linear_free, optimizer_step, dataset_size may not exist in all implementations
+extern linear_create
+extern linear_forward
+
+extern mse_loss
+extern cross_entropy_loss
+
+extern sgd_create
+extern adam_create
+extern optimizer_step
+extern optimizer_free
+
+extern node_create
+extern node_free
+extern backward
+
+extern dataset_load_csv
+extern dataset_free
+extern dataset_get_batch
+extern dataset_size
+
+extern config_parse
+extern config_free
+extern config_get_int
+extern config_get_float
+extern config_get_string
+
+extern detect_cpu_features
+
+; Tensor struct offsets (must match tensor.asm)
+%define TENSOR_DATA     0
+%define TENSOR_NDIM     8
+%define TENSOR_SHAPE    16
+%define TENSOR_STRIDE   24
+%define TENSOR_DTYPE    32
+%define TENSOR_FLAGS    36
+
+; Export API functions
+global neural_init
+global neural_shutdown
+global neural_version
+global neural_get_last_error
+global neural_get_error_message
+global neural_clear_error
+global neural_tensor_create
+global neural_tensor_zeros
+global neural_tensor_ones
+global neural_tensor_random
+global neural_tensor_from_data
+global neural_tensor_from_buffer
+global neural_tensor_free
+global neural_tensor_data
+global neural_tensor_ndim
+global neural_tensor_shape
+global neural_tensor_numel
+global neural_tensor_dtype
+global neural_tensor_bytes
+global neural_tensor_fill
+global neural_tensor_copy
+global neural_tensor_reshape
+global neural_add
+global neural_sub
+global neural_mul
+global neural_div
+global neural_matmul
+global neural_sum
+global neural_mean
+global neural_relu
+global neural_sigmoid
+global neural_tanh
+global neural_softmax
+global neural_linear_create
+global neural_linear_free
+global neural_linear_forward
+global neural_linear_weight
+global neural_linear_bias
+global neural_mse_loss
+global neural_cross_entropy_loss
+global neural_sgd_create
+global neural_adam_create
+global neural_optimizer_free
+global neural_optimizer_step
+global neural_optimizer_zero_grad
+global neural_node_create
+global neural_node_free
+global neural_backward
+global neural_node_grad
+global neural_dataset_load_csv
+global neural_dataset_free
+global neural_dataset_size
+global neural_dataset_get_batch
+global neural_config_load
+global neural_config_free
+global neural_config_get_int
+global neural_config_get_float
+global neural_config_get_string
+global neural_get_simd_level
+global neural_get_simd_name
+
+; =============================================================================
+; neural_init - Initialize the framework
+; Returns: int (0 on success, error code on failure)
+; =============================================================================
+neural_init:
+    push rbp
+    mov rbp, rsp
+    
+    ; Check if already initialized
+    mov eax, [rel initialized]
+    test eax, eax
+    jnz .already_init
+    
+    ; Initialize memory subsystem
+    call mem_init
+    test eax, eax
+    jnz .mem_fail
+    
+    ; Detect SIMD capabilities
+    call detect_cpu_features
+    
+    ; Mark as initialized
+    mov dword [rel initialized], 1
+    mov dword [rel last_error], NEURAL_OK
+    
+    xor eax, eax
+    jmp .done
+
+.already_init:
+    xor eax, eax
+    jmp .done
+
+.mem_fail:
+    mov dword [rel last_error], NEURAL_ERR_OUT_OF_MEMORY
+    mov eax, NEURAL_ERR_OUT_OF_MEMORY
+    
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_shutdown - Shutdown the framework
+; =============================================================================
+neural_shutdown:
+    push rbp
+    mov rbp, rsp
+    
+    mov dword [rel initialized], 0
+    mov dword [rel last_error], NEURAL_OK
+    
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_version - Get version string
+; Returns: const char*
+; =============================================================================
+neural_version:
+    lea rax, [rel version_str]
+    ret
+
+; =============================================================================
+; neural_get_last_error - Get last error code
+; Returns: int
+; =============================================================================
+neural_get_last_error:
+    mov eax, [rel last_error]
+    ret
+
+; =============================================================================
+; neural_get_error_message - Get error message for code
+; Arguments: int error_code
+; Returns: const char*
+; =============================================================================
+neural_get_error_message:
+    push rbp
+    mov rbp, rsp
+    
+    call error_get_message
+    
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_clear_error - Clear last error
+; =============================================================================
+neural_clear_error:
+    mov dword [rel last_error], NEURAL_OK
+    call error_clear
+    ret
+
+; =============================================================================
+; neural_tensor_create - Create a new tensor
+; Arguments:
+;   RDI = const uint64_t* shape
+;   RSI = uint64_t ndim
+;   EDX = int dtype
+; Returns: NeuralTensor* (NULL on error)
+; =============================================================================
+neural_tensor_create:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 8
+    
+    ; Save arguments
+    mov r12, rdi            ; shape
+    mov r13, rsi            ; ndim
+    mov r14d, edx           ; dtype
+    
+    ; Validate arguments
+    test rdi, rdi
+    jz .null_shape
+    
+    test rsi, rsi
+    jz .zero_ndim
+    
+    cmp edx, 1
+    ja .invalid_dtype
+    
+    ; Call internal tensor_create
+    ; tensor_create(ndim, shape, dtype)
+    mov rdi, r13            ; ndim
+    mov rsi, r12            ; shape
+    mov edx, r14d           ; dtype
+    call tensor_create
+    
+    test rax, rax
+    jz .alloc_fail
+    
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null_shape:
+    mov dword [rel last_error], NEURAL_ERR_NULL_POINTER
+    xor eax, eax
+    jmp .done
+
+.zero_ndim:
+    ; Create scalar tensor
+    mov rdi, 0
+    xor esi, esi
+    mov edx, r14d
+    call tensor_create
+    jmp .check_result
+
+.invalid_dtype:
+    mov dword [rel last_error], NEURAL_ERR_INVALID_DTYPE
+    xor eax, eax
+    jmp .done
+
+.alloc_fail:
+    mov dword [rel last_error], NEURAL_ERR_OUT_OF_MEMORY
+    xor eax, eax
+    jmp .done
+
+.check_result:
+    test rax, rax
+    jz .alloc_fail
+    mov dword [rel last_error], NEURAL_OK
+
+.done:
+    add rsp, 8
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_tensor_zeros - Create tensor filled with zeros
+; Arguments: same as neural_tensor_create
+; Returns: NeuralTensor*
+; =============================================================================
+neural_tensor_zeros:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    sub rsp, 8
+    
+    ; Create tensor first
+    call neural_tensor_create
+    test rax, rax
+    jz .done
+    
+    mov r12, rax
+    
+    ; Fill with zeros
+    mov rdi, rax
+    xorps xmm0, xmm0        ; value = 0.0
+    call tensor_fill
+    
+    mov rax, r12
+    
+.done:
+    add rsp, 8
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_tensor_ones - Create tensor filled with ones
+; =============================================================================
+neural_tensor_ones:
+    push rbp
+    mov rbp, rsp
+    push r12
+    sub rsp, 8
+    
+    ; Create tensor first
+    call neural_tensor_create
+    test rax, rax
+    jz .done
+    
+    mov r12, rax
+    
+    ; Fill with ones
+    mov rdi, rax
+    mov eax, 0x3f800000     ; 1.0f in IEEE 754
+    movd xmm0, eax
+    call tensor_fill
+    
+    mov rax, r12
+    
+.done:
+    add rsp, 8
+    pop r12
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_tensor_free - Free a tensor
+; Arguments: NeuralTensor* tensor
+; =============================================================================
+neural_tensor_free:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .done
+    
+    call tensor_free
+    
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_tensor_data - Get data pointer
+; Arguments: NeuralTensor* tensor
+; Returns: void*
+; =============================================================================
+neural_tensor_data:
+    test rdi, rdi
+    jz .null
+    mov rax, [rdi + TENSOR_DATA]
+    ret
+.null:
+    xor eax, eax
+    ret
+
+; =============================================================================
+; neural_tensor_ndim - Get number of dimensions
+; Arguments: NeuralTensor* tensor
+; Returns: uint64_t
+; =============================================================================
+neural_tensor_ndim:
+    test rdi, rdi
+    jz .null
+    mov rax, [rdi + TENSOR_NDIM]
+    ret
+.null:
+    xor eax, eax
+    ret
+
+; =============================================================================
+; neural_tensor_shape - Get shape pointer
+; Arguments: NeuralTensor* tensor
+; Returns: const uint64_t*
+; =============================================================================
+neural_tensor_shape:
+    test rdi, rdi
+    jz .null
+    mov rax, [rdi + TENSOR_SHAPE]
+    ret
+.null:
+    xor eax, eax
+    ret
+
+; =============================================================================
+; neural_tensor_numel - Get total number of elements
+; Arguments: NeuralTensor* tensor
+; Returns: uint64_t
+; =============================================================================
+neural_tensor_numel:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    call tensor_numel
+    jmp .done
+
+.null:
+    xor eax, eax
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_tensor_dtype - Get data type
+; Arguments: NeuralTensor* tensor
+; Returns: int (-1 if null)
+; =============================================================================
+neural_tensor_dtype:
+    test rdi, rdi
+    jz .null
+    mov eax, [rdi + TENSOR_DTYPE]
+    ret
+.null:
+    mov eax, -1
+    ret
+
+; =============================================================================
+; neural_tensor_bytes - Get size in bytes
+; Arguments: NeuralTensor* tensor
+; Returns: uint64_t
+; =============================================================================
+neural_tensor_bytes:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    call tensor_data_size
+    jmp .done
+
+.null:
+    xor eax, eax
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_tensor_fill - Fill tensor with value
+; Arguments:
+;   RDI = NeuralTensor* tensor
+;   XMM0 = double value
+; Returns: int (error code)
+; =============================================================================
+neural_tensor_fill:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    ; Convert double to float if needed
+    cvtsd2ss xmm0, xmm0
+    call tensor_fill
+    
+    xor eax, eax
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_tensor_copy - Copy tensor data
+; Arguments:
+;   RDI = NeuralTensor* dst
+;   RSI = const NeuralTensor* src
+; Returns: int (error code)
+; =============================================================================
+neural_tensor_copy:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    
+    call tensor_copy
+    
+    xor eax, eax
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_add - Element-wise addition
+; Arguments:
+;   RDI = NeuralTensor* out
+;   RSI = const NeuralTensor* a
+;   RDX = const NeuralTensor* b
+; Returns: int (error code)
+; =============================================================================
+neural_add:
+    push rbp
+    mov rbp, rsp
+    push r12
+    push r13
+    push r14
+    
+    mov r12, rdi
+    mov r13, rsi
+    mov r14, rdx
+    
+    ; Validate pointers
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    test rdx, rdx
+    jz .null
+    
+    ; Get output data and size
+    mov rdi, [r13 + TENSOR_DATA]   ; a->data
+    mov rsi, [r14 + TENSOR_DATA]   ; b->data
+    mov rdx, [r12 + TENSOR_DATA]   ; out->data
+    
+    ; Get number of elements
+    mov rcx, r13
+    push rdi
+    push rsi
+    push rdx
+    mov rdi, r13
+    call tensor_numel
+    pop rdx
+    pop rsi
+    pop rdi
+    mov rcx, rax
+    
+    ; Call kernel
+    call ew_add
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_sub - Element-wise subtraction
+; =============================================================================
+neural_sub:
+    push rbp
+    mov rbp, rsp
+    push r12
+    push r13
+    push r14
+    
+    mov r12, rdi
+    mov r13, rsi
+    mov r14, rdx
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    test rdx, rdx
+    jz .null
+    
+    mov rdi, [r13 + TENSOR_DATA]
+    mov rsi, [r14 + TENSOR_DATA]
+    mov rdx, [r12 + TENSOR_DATA]
+    
+    push rdi
+    push rsi
+    push rdx
+    mov rdi, r13
+    call tensor_numel
+    pop rdx
+    pop rsi
+    pop rdi
+    mov rcx, rax
+    
+    call ew_sub
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_mul - Element-wise multiplication
+; =============================================================================
+neural_mul:
+    push rbp
+    mov rbp, rsp
+    push r12
+    push r13
+    push r14
+    
+    mov r12, rdi
+    mov r13, rsi
+    mov r14, rdx
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    test rdx, rdx
+    jz .null
+    
+    mov rdi, [r13 + TENSOR_DATA]
+    mov rsi, [r14 + TENSOR_DATA]
+    mov rdx, [r12 + TENSOR_DATA]
+    
+    push rdi
+    push rsi
+    push rdx
+    mov rdi, r13
+    call tensor_numel
+    pop rdx
+    pop rsi
+    pop rdi
+    mov rcx, rax
+    
+    call ew_mul
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_div - Element-wise division
+; =============================================================================
+neural_div:
+    push rbp
+    mov rbp, rsp
+    push r12
+    push r13
+    push r14
+    
+    mov r12, rdi
+    mov r13, rsi
+    mov r14, rdx
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    test rdx, rdx
+    jz .null
+    
+    mov rdi, [r13 + TENSOR_DATA]
+    mov rsi, [r14 + TENSOR_DATA]
+    mov rdx, [r12 + TENSOR_DATA]
+    
+    push rdi
+    push rsi
+    push rdx
+    mov rdi, r13
+    call tensor_numel
+    pop rdx
+    pop rsi
+    pop rdi
+    mov rcx, rax
+    
+    call ew_div
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_matmul - Matrix multiplication
+; =============================================================================
+neural_matmul:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    test rdx, rdx
+    jz .null
+    
+    call matmul
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_relu - ReLU activation
+; =============================================================================
+neural_relu:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    
+    call relu_forward
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_sigmoid - Sigmoid activation
+; =============================================================================
+neural_sigmoid:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    
+    call sigmoid_forward
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_softmax - Softmax activation
+; =============================================================================
+neural_softmax:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    
+    call softmax_forward
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_linear_create - Create linear layer
+; Arguments:
+;   RDI = uint64_t in_features
+;   RSI = uint64_t out_features
+;   EDX = int bias
+; Returns: NeuralLinear*
+; =============================================================================
+neural_linear_create:
+    push rbp
+    mov rbp, rsp
+    
+    call linear_create
+    
+    test rax, rax
+    jz .fail
+    
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.fail:
+    mov dword [rel last_error], NEURAL_ERR_OUT_OF_MEMORY
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_linear_free - Free linear layer
+; =============================================================================
+neural_linear_free:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .done
+    
+    ; linear_free may not exist - just free the memory directly
+    call mem_free
+    
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_linear_forward - Forward pass through linear layer
+; =============================================================================
+neural_linear_forward:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    test rdx, rdx
+    jz .null
+    
+    call linear_forward
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_sgd_create - Create SGD optimizer
+; Arguments:
+;   XMM0 = double learning_rate
+;   XMM1 = double momentum
+; Returns: NeuralOptimizer*
+; =============================================================================
+neural_sgd_create:
+    push rbp
+    mov rbp, rsp
+    
+    call sgd_create
+    
+    test rax, rax
+    jz .fail
+    
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.fail:
+    mov dword [rel last_error], NEURAL_ERR_OUT_OF_MEMORY
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_adam_create - Create Adam optimizer
+; =============================================================================
+neural_adam_create:
+    push rbp
+    mov rbp, rsp
+    
+    call adam_create
+    
+    test rax, rax
+    jz .fail
+    
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.fail:
+    mov dword [rel last_error], NEURAL_ERR_OUT_OF_MEMORY
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_optimizer_free - Free optimizer
+; =============================================================================
+neural_optimizer_free:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .done
+    
+    call optimizer_free
+    
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_dataset_load_csv - Load dataset from CSV
+; =============================================================================
+neural_dataset_load_csv:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    call dataset_load_csv
+    
+    test rax, rax
+    jz .fail
+    
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov dword [rel last_error], NEURAL_ERR_NULL_POINTER
+    xor eax, eax
+    jmp .done
+
+.fail:
+    mov dword [rel last_error], NEURAL_ERR_FILE_NOT_FOUND
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_dataset_free - Free dataset
+; =============================================================================
+neural_dataset_free:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .done
+    
+    call dataset_free
+    
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_dataset_size - Get dataset size
+; =============================================================================
+neural_dataset_size:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    call dataset_size
+    jmp .done
+
+.null:
+    xor eax, eax
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_config_load - Load configuration
+; =============================================================================
+neural_config_load:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    call config_parse
+    
+    test rax, rax
+    jz .fail
+    
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov dword [rel last_error], NEURAL_ERR_NULL_POINTER
+    xor eax, eax
+    jmp .done
+
+.fail:
+    mov dword [rel last_error], NEURAL_ERR_FILE_NOT_FOUND
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_config_free - Free configuration
+; =============================================================================
+neural_config_free:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .done
+    
+    call config_free
+    
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_get_simd_level - Get SIMD level
+; Returns: int (0=scalar, 1=SSE2, 2=AVX, 3=AVX2, 4=AVX-512)
+; =============================================================================
+neural_get_simd_level:
+    push rbp
+    mov rbp, rsp
+    
+    call detect_cpu_features
+    
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_get_simd_name - Get SIMD level name
+; Returns: const char*
+; =============================================================================
+neural_get_simd_name:
+    push rbp
+    mov rbp, rsp
+    
+    call detect_cpu_features
+    
+    cmp eax, 0
+    je .scalar
+    cmp eax, 1
+    je .sse2
+    cmp eax, 2
+    je .avx
+    cmp eax, 3
+    je .avx2
+    cmp eax, 4
+    je .avx512
+    
+.scalar:
+    lea rax, [rel simd_name_scalar]
+    jmp .done
+.sse2:
+    lea rax, [rel simd_name_sse2]
+    jmp .done
+.avx:
+    lea rax, [rel simd_name_avx]
+    jmp .done
+.avx2:
+    lea rax, [rel simd_name_avx2]
+    jmp .done
+.avx512:
+    lea rax, [rel simd_name_avx512]
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
+; Stub implementations for functions that need more complex handling
+; =============================================================================
+
+neural_tensor_random:
+    ; TODO: Implement random tensor creation
+    mov dword [rel last_error], NEURAL_ERR_NOT_IMPLEMENTED
+    xor eax, eax
+    ret
+
+neural_tensor_from_data:
+    ; TODO: Implement tensor from data
+    mov dword [rel last_error], NEURAL_ERR_NOT_IMPLEMENTED
+    xor eax, eax
+    ret
+
+neural_tensor_from_buffer:
+    ; TODO: Implement zero-copy tensor
+    mov dword [rel last_error], NEURAL_ERR_NOT_IMPLEMENTED
+    xor eax, eax
+    ret
+
+neural_tensor_reshape:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    call tensor_reshape
+    jmp .done
+
+.null:
+    mov dword [rel last_error], NEURAL_ERR_NULL_POINTER
+    xor eax, eax
+
+.done:
+    pop rbp
+    ret
+
+neural_sum:
+    mov dword [rel last_error], NEURAL_ERR_NOT_IMPLEMENTED
+    mov eax, NEURAL_ERR_NOT_IMPLEMENTED
+    ret
+
+neural_mean:
+    mov dword [rel last_error], NEURAL_ERR_NOT_IMPLEMENTED
+    mov eax, NEURAL_ERR_NOT_IMPLEMENTED
+    ret
+
+neural_tanh:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    
+    call tanh_forward
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
+
+neural_linear_weight:
+    ; TODO: Implement getter
+    xor eax, eax
+    ret
+
+neural_linear_bias:
+    ; TODO: Implement getter
+    xor eax, eax
+    ret
+
+neural_mse_loss:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    test rdx, rdx
+    jz .null
+    
+    call mse_loss
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
+
+neural_cross_entropy_loss:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    test rdx, rdx
+    jz .null
+    
+    call cross_entropy_loss
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
+
+neural_optimizer_step:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    call optimizer_step
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
+
+neural_optimizer_zero_grad:
+    ; Zero out gradient tensors
+    mov dword [rel last_error], NEURAL_ERR_NOT_IMPLEMENTED
+    mov eax, NEURAL_ERR_NOT_IMPLEMENTED
+    ret
+
+neural_node_create:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    call node_create
+    
+    test rax, rax
+    jz .fail
+    
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov dword [rel last_error], NEURAL_ERR_NULL_POINTER
+    xor eax, eax
+    jmp .done
+
+.fail:
+    mov dword [rel last_error], NEURAL_ERR_OUT_OF_MEMORY
+
+.done:
+    pop rbp
+    ret
+
+neural_node_free:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .done
+    
+    call node_free
+    
+.done:
+    pop rbp
+    ret
+
+neural_backward:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    call backward
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
+
+neural_node_grad:
+    ; TODO: Get gradient from node
+    xor eax, eax
+    ret
+
+neural_dataset_get_batch:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    call dataset_get_batch
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
+
+neural_config_get_int:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    call config_get_int
+    jmp .done
+
+.null:
+    mov eax, ecx    ; Return default value
+
+.done:
+    pop rbp
+    ret
+
+neural_config_get_float:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    call config_get_float
+    jmp .done
+
+.null:
+    movsd xmm0, xmm2    ; Return default value
+
+.done:
+    pop rbp
+    ret
+
+neural_config_get_string:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    call config_get_string
+    jmp .done
+
+.null:
+    mov rax, rcx    ; Return default value
+
+.done:
+    pop rbp
+    ret

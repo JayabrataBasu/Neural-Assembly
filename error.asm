@@ -74,7 +74,7 @@ section .data
     NUM_ERROR_CODES         equ 19
     
     ; Formatting
-    err_prefix:             db "[ERROR] ", 0
+    err_prefix:             db "[rel ERROR] ", 0
     err_at:                 db " at ", 0
     err_line:               db " line ", 0
     err_details:            db ": ", 0
@@ -145,10 +145,10 @@ error_set:
     push rbp
     mov rbp, rsp
     
-    mov [last_error_code], edi
-    mov [last_error_file], rsi
-    mov [last_error_line], edx
-    mov [last_error_detail], rcx
+    mov [rel last_error_code], edi
+    mov [rel last_error_file], rsi
+    mov [rel last_error_line], edx
+    mov [rel last_error_detail], rcx
     
     pop rbp
     ret
@@ -159,17 +159,17 @@ error_set:
 ;   EAX = error code
 ; =============================================================================
 error_get:
-    mov eax, [last_error_code]
+    mov eax, [rel last_error_code]
     ret
 
 ; =============================================================================
 ; error_clear - Clear the last error
 ; =============================================================================
 error_clear:
-    mov dword [last_error_code], ERR_NONE
-    mov qword [last_error_file], 0
-    mov dword [last_error_line], 0
-    mov qword [last_error_detail], 0
+    mov dword [rel last_error_code], ERR_NONE
+    mov qword [rel last_error_file], 0
+    mov dword [rel last_error_line], 0
+    mov qword [rel last_error_detail], 0
     ret
 
 ; =============================================================================
@@ -212,7 +212,7 @@ error_print:
     
     ; Get stderr
     mov rax, [rel stderr wrt ..got]
-    mov r12, [rax]
+    mov r12, [rel rax]
     
     ; Print prefix
     mov rdi, r12
@@ -221,7 +221,7 @@ error_print:
     call fprintf wrt ..plt
     
     ; Get and print error message
-    mov edi, [last_error_code]
+    mov edi, [rel last_error_code]
     call error_get_message
     mov rbx, rax
     
@@ -231,7 +231,7 @@ error_print:
     call fprintf wrt ..plt
     
     ; Print location if available
-    mov rax, [last_error_file]
+    mov rax, [rel last_error_file]
     test rax, rax
     jz .no_location
     
@@ -241,7 +241,7 @@ error_print:
     call fprintf wrt ..plt
     
     mov rdi, r12
-    mov rsi, [last_error_file]
+    mov rsi, [rel last_error_file]
     xor eax, eax
     call fprintf wrt ..plt
     
@@ -252,13 +252,13 @@ error_print:
     
     mov rdi, r12
     lea rsi, [rel fmt_int]
-    mov edx, [last_error_line]
+    mov edx, [rel last_error_line]
     xor eax, eax
     call fprintf wrt ..plt
     
 .no_location:
     ; Print detail if available
-    mov rax, [last_error_detail]
+    mov rax, [rel last_error_detail]
     test rax, rax
     jz .no_detail
     
@@ -268,7 +268,7 @@ error_print:
     call fprintf wrt ..plt
     
     mov rdi, r12
-    mov rsi, [last_error_detail]
+    mov rsi, [rel last_error_detail]
     xor eax, eax
     call fprintf wrt ..plt
     
@@ -298,10 +298,10 @@ error_panic:
     sub rsp, 16
     
     ; Set error
-    mov [rsp], edi
+    mov [rel rsp], edi
     mov [rsp+8], rsi
     
-    mov edi, [rsp]
+    mov edi, [rel rsp]
     xor esi, esi                ; no file
     xor edx, edx                ; no line
     mov rcx, [rsp+8]
@@ -365,7 +365,7 @@ check_tensor_valid:
     jz .tensor_null
     
     ; Check data pointer
-    mov rax, [rbx]              ; TENSOR_DATA
+    mov rax, [rel rbx]              ; TENSOR_DATA
     test rax, rax
     jz .data_null
     
@@ -467,8 +467,8 @@ check_shapes_match:
     test rcx, rcx
     jz .match
     
-    mov rax, [rsi]
-    cmp rax, [rdi]
+    mov rax, [rel rsi]
+    cmp rax, [rel rdi]
     jne .shape_mismatch
     
     add rsi, 8
@@ -572,7 +572,7 @@ error_check_nan:
     call tensor_numel wrt ..plt
     mov r13, rax
     
-    mov rbx, [r12]              ; data pointer
+    mov rbx, [rel r12]              ; data pointer
     mov eax, [r12 + 32]         ; dtype
     
     test eax, eax
@@ -583,7 +583,7 @@ error_check_nan:
     test r13, r13
     jz .no_nan
     
-    movss xmm0, [rbx]
+    movss xmm0, [rel rbx]
     ucomiss xmm0, xmm0          ; NaN != NaN
     jp .nan_found
     
@@ -595,7 +595,7 @@ error_check_nan:
     test r13, r13
     jz .no_nan
     
-    movsd xmm0, [rbx]
+    movsd xmm0, [rel rbx]
     ucomisd xmm0, xmm0
     jp .nan_found
     

@@ -8,7 +8,7 @@ section .data
     align 8
     newline:        db 10, 0
     assert_prefix:  db "Assertion failed: ", 0
-    info_prefix:    db "[INFO] ", 0
+    info_prefix:    db "[rel INFO] ", 0
     
     ; Format strings for printing
     fmt_int:        db "%ld", 0
@@ -70,7 +70,7 @@ panic:
     
     ; Get stderr file handle
     mov rdi, [rel stderr wrt ..got]
-    mov rdi, [rdi]
+    mov rdi, [rel rdi]
     
     ; Print message to stderr
     mov rsi, rbx
@@ -79,7 +79,7 @@ panic:
     
     ; Print newline
     mov rdi, [rel stderr wrt ..got]
-    mov rdi, [rdi]
+    mov rdi, [rel rdi]
     lea rsi, [rel fmt_newline]
     xor eax, eax
     call fprintf wrt ..plt

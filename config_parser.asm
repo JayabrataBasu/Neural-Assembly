@@ -1,6 +1,6 @@
 ; config_parser.asm - Configuration File Parser
 ; Parses INI-style configuration files for network architecture and training params
-; Format: [section] key=value with # comments
+; Format: [rel section] key=value with # comments
 
 section .data
     ; Default configuration values
@@ -84,8 +84,8 @@ section .data
     err_config_section: db "Error: Unknown section: ", 0
     err_config_key:     db "Error: Unknown key: ", 0
     newline:            db 10, 0
-    dbg_section:        db "[DBG] Section: ", 0
-    dbg_data_key:       db "[DBG] process_data_key: ", 0
+    dbg_section:        db "[rel DBG] Section: ", 0
+    dbg_data_key:       db "[rel DBG] process_data_key: ", 0
     dbg_newline:        db 10, 0
 
 section .bss
@@ -315,7 +315,7 @@ config_parse:
     ; Read entire file into buffer
     mov rax, 0                  ; sys_read
     mov rdi, r14
-    lea rsi, [file_buffer]
+    lea rsi, [rel file_buffer]
     mov rdx, 8192
     syscall
     
@@ -325,7 +325,7 @@ config_parse:
     mov r15, rax                ; bytes read
     
     ; Null terminate
-    lea rdi, [file_buffer]
+    lea rdi, [rel file_buffer]
     mov byte [rdi + r15], 0
     
     ; Close file
@@ -334,21 +334,21 @@ config_parse:
     syscall
     
     ; Parse the buffer
-    lea rsi, [file_buffer]
-    mov dword [current_line], 0
-    mov qword [current_section], 0
+    lea rsi, [rel file_buffer]
+    mov dword [rel current_line], 0
+    mov qword [rel current_section], 0
     
 .parse_loop:
     ; Check for end of buffer
-    mov al, [rsi]
+    mov al, [rel rsi]
     test al, al
     jz .parse_done
     
-    inc dword [current_line]
+    inc dword [rel current_line]
     
     ; Skip leading whitespace
 .skip_leading:
-    mov al, [rsi]
+    mov al, [rel rsi]
     cmp al, ' '
     je .next_leading
     cmp al, 9                   ; tab
@@ -361,7 +361,7 @@ config_parse:
     
 .check_line:
     ; Check for empty line or comment
-    mov al, [rsi]
+    mov al, [rel rsi]
     cmp al, 10                  ; newline
     je .next_line
     cmp al, 13                  ; CR
@@ -378,7 +378,7 @@ config_parse:
     
 .skip_comment:
 .find_newline:
-    mov al, [rsi]
+    mov al, [rel rsi]
     test al, al
     jz .parse_done
     cmp al, 10
@@ -392,52 +392,52 @@ config_parse:
     
 .parse_section:
     inc rsi                     ; skip '['
-    lea rdi, [section_buffer]
+    lea rdi, [rel section_buffer]
     
 .copy_section:
-    mov al, [rsi]
+    mov al, [rel rsi]
     cmp al, ']'
     je .section_done
     cmp al, 10
     je .section_error
     test al, al
     jz .section_error
-    mov [rdi], al
+    mov [rel rdi], al
     inc rsi
     inc rdi
     jmp .copy_section
     
 .section_done:
-    mov byte [rdi], 0           ; null terminate
+    mov byte [rel rdi], 0           ; null terminate
     inc rsi                     ; skip ']'
     
     ; Save buffer position - rsi will be clobbered by section comparisons
     push rsi
     
     ; Identify section
-    lea rdi, [section_buffer]
+    lea rdi, [rel section_buffer]
     call str_to_lower
     
-    lea rdi, [section_buffer]
-    lea rsi, [section_model]
+    lea rdi, [rel section_buffer]
+    lea rsi, [rel section_model]
     call str_equals_nocase
     test eax, eax
     jnz .set_section_model
     
-    lea rdi, [section_buffer]
-    lea rsi, [section_training]
+    lea rdi, [rel section_buffer]
+    lea rsi, [rel section_training]
     call str_equals_nocase
     test eax, eax
     jnz .set_section_training
     
-    lea rdi, [section_buffer]
-    lea rsi, [section_optimizer]
+    lea rdi, [rel section_buffer]
+    lea rsi, [rel section_optimizer]
     call str_equals_nocase
     test eax, eax
     jnz .set_section_optimizer
     
-    lea rdi, [section_buffer]
-    lea rsi, [section_data]
+    lea rdi, [rel section_buffer]
+    lea rsi, [rel section_data]
     call str_equals_nocase
     test eax, eax
     jnz .set_section_data
@@ -447,22 +447,22 @@ config_parse:
     jmp .find_newline
     
 .set_section_model:
-    mov qword [current_section], 1
+    mov qword [rel current_section], 1
     pop rsi                     ; restore buffer position
     jmp .find_newline
     
 .set_section_training:
-    mov qword [current_section], 2
+    mov qword [rel current_section], 2
     pop rsi                     ; restore buffer position
     jmp .find_newline
     
 .set_section_optimizer:
-    mov qword [current_section], 3
+    mov qword [rel current_section], 3
     pop rsi                     ; restore buffer position
     jmp .find_newline
     
 .set_section_data:
-    mov qword [current_section], 4
+    mov qword [rel current_section], 4
     pop rsi                     ; restore buffer position
     jmp .find_newline
     
@@ -472,10 +472,10 @@ config_parse:
     
 .parse_key_value:
     ; Copy key
-    lea rdi, [key_buffer]
+    lea rdi, [rel key_buffer]
     
 .copy_key:
-    mov al, [rsi]
+    mov al, [rel rsi]
     cmp al, '='
     je .key_done
     cmp al, ' '
@@ -484,7 +484,7 @@ config_parse:
     je .kv_error
     test al, al
     jz .parse_done
-    mov [rdi], al
+    mov [rel rdi], al
     inc rsi
     inc rdi
     jmp .copy_key
@@ -494,12 +494,12 @@ config_parse:
     jmp .copy_key
     
 .key_done:
-    mov byte [rdi], 0
+    mov byte [rel rdi], 0
     inc rsi                     ; skip '='
     
     ; Skip whitespace after =
 .skip_val_space:
-    mov al, [rsi]
+    mov al, [rel rsi]
     cmp al, ' '
     je .next_val_space
     cmp al, 9
@@ -511,10 +511,10 @@ config_parse:
     jmp .skip_val_space
     
 .copy_value:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     
 .copy_val_loop:
-    mov al, [rsi]
+    mov al, [rel rsi]
     cmp al, 10
     je .value_done
     cmp al, 13
@@ -523,20 +523,20 @@ config_parse:
     je .value_done
     test al, al
     jz .value_done
-    mov [rdi], al
+    mov [rel rdi], al
     inc rsi
     inc rdi
     jmp .copy_val_loop
     
 .value_done:
-    mov byte [rdi], 0
+    mov byte [rel rdi], 0
     
     ; Trim trailing whitespace from value
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call trim_trailing
     
     ; Process based on current section
-    mov rax, [current_section]
+    mov rax, [rel current_section]
     cmp rax, 1
     je .process_model
     cmp rax, 2
@@ -579,7 +579,7 @@ config_parse:
     jmp .parse_cleanup
     
 .parse_open_error:
-    lea rdi, [err_config_open]
+    lea rdi, [rel err_config_open]
     call print_error_msg
     mov rax, r13                ; return default config
     jmp .parse_cleanup
@@ -602,52 +602,52 @@ config_parse:
     pop rbp
     ret
 
-; process_model_key - Handle [model] section keys
+; process_model_key - Handle [rel model] section keys
 ; Uses: r13 = config pointer, key_buffer, value_buffer
 process_model_key:
     push rbp
     mov rbp, rsp
     push rbx
     
-    lea rdi, [key_buffer]
+    lea rdi, [rel key_buffer]
     
     ; Check input_size
-    lea rsi, [key_input_size]
+    lea rsi, [rel key_input_size]
     call str_equals_nocase
     test eax, eax
     jnz .set_input_size
     
     ; Check hidden_size
-    lea rdi, [key_buffer]
-    lea rsi, [key_hidden_size]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_hidden_size]
     call str_equals_nocase
     test eax, eax
     jnz .set_hidden_size
     
     ; Check output_size
-    lea rdi, [key_buffer]
-    lea rsi, [key_output_size]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_output_size]
     call str_equals_nocase
     test eax, eax
     jnz .set_output_size
     
     ; Check num_layers
-    lea rdi, [key_buffer]
-    lea rsi, [key_num_layers]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_num_layers]
     call str_equals_nocase
     test eax, eax
     jnz .set_num_layers
     
     ; Check activation
-    lea rdi, [key_buffer]
-    lea rsi, [key_activation]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_activation]
     call str_equals_nocase
     test eax, eax
     jnz .set_activation
     
     ; Check dropout_rate
-    lea rdi, [key_buffer]
-    lea rsi, [key_dropout_rate]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_dropout_rate]
     call str_equals_nocase
     test eax, eax
     jnz .set_dropout_rate
@@ -655,53 +655,53 @@ process_model_key:
     jmp .model_key_done
     
 .set_input_size:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_int
     mov [r13 + OFF_INPUT_SIZE], eax
     jmp .model_key_done
     
 .set_hidden_size:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_int
     mov [r13 + OFF_HIDDEN_SIZE], eax
     jmp .model_key_done
     
 .set_output_size:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_int
     mov [r13 + OFF_OUTPUT_SIZE], eax
     jmp .model_key_done
     
 .set_num_layers:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_int
     mov [r13 + OFF_NUM_LAYERS], eax
     jmp .model_key_done
     
 .set_activation:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call str_to_lower
     
-    lea rdi, [value_buffer]
-    lea rsi, [act_relu]
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel act_relu]
     call str_equals_nocase
     test eax, eax
     jnz .act_relu_set
     
-    lea rdi, [value_buffer]
-    lea rsi, [act_sigmoid]
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel act_sigmoid]
     call str_equals_nocase
     test eax, eax
     jnz .act_sigmoid_set
     
-    lea rdi, [value_buffer]
-    lea rsi, [act_tanh]
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel act_tanh]
     call str_equals_nocase
     test eax, eax
     jnz .act_tanh_set
     
-    lea rdi, [value_buffer]
-    lea rsi, [act_softmax]
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel act_softmax]
     call str_equals_nocase
     test eax, eax
     jnz .act_softmax_set
@@ -725,7 +725,7 @@ process_model_key:
     jmp .model_key_done
     
 .set_dropout_rate:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_float
     movss [r13 + OFF_DROPOUT_RATE], xmm0
     jmp .model_key_done
@@ -735,71 +735,71 @@ process_model_key:
     pop rbp
     ret
 
-; process_training_key - Handle [training] section keys
+; process_training_key - Handle [rel training] section keys
 process_training_key:
     push rbp
     mov rbp, rsp
     
-    lea rdi, [key_buffer]
+    lea rdi, [rel key_buffer]
     
     ; Check epochs
-    lea rsi, [key_epochs]
+    lea rsi, [rel key_epochs]
     call str_equals_nocase
     test eax, eax
     jnz .set_epochs
     
     ; Check batch_size
-    lea rdi, [key_buffer]
-    lea rsi, [key_batch_size]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_batch_size]
     call str_equals_nocase
     test eax, eax
     jnz .set_batch_size
     
     ; Check learning_rate
-    lea rdi, [key_buffer]
-    lea rsi, [key_learning_rate]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_learning_rate]
     call str_equals_nocase
     test eax, eax
     jnz .set_learning_rate
     
     ; Check lr (alias)
-    lea rdi, [key_buffer]
-    lea rsi, [key_lr]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_lr]
     call str_equals_nocase
     test eax, eax
     jnz .set_learning_rate
     
     ; Check weight_decay
-    lea rdi, [key_buffer]
-    lea rsi, [key_weight_decay]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_weight_decay]
     call str_equals_nocase
     test eax, eax
     jnz .set_weight_decay
     
     ; Check early_stopping
-    lea rdi, [key_buffer]
-    lea rsi, [key_early_stopping]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_early_stopping]
     call str_equals_nocase
     test eax, eax
     jnz .set_early_stopping
     
     ; Check patience
-    lea rdi, [key_buffer]
-    lea rsi, [key_patience]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_patience]
     call str_equals_nocase
     test eax, eax
     jnz .set_patience
     
     ; Check lr_step_size
-    lea rdi, [key_buffer]
-    lea rsi, [key_lr_step_size]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_lr_step_size]
     call str_equals_nocase
     test eax, eax
     jnz .set_lr_step_size
     
     ; Check lr_gamma
-    lea rdi, [key_buffer]
-    lea rsi, [key_lr_gamma]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_lr_gamma]
     call str_equals_nocase
     test eax, eax
     jnz .set_lr_gamma
@@ -807,49 +807,49 @@ process_training_key:
     jmp .training_key_done
     
 .set_epochs:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_int
     mov [r13 + OFF_EPOCHS], eax
     jmp .training_key_done
     
 .set_batch_size:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_int
     mov [r13 + OFF_BATCH_SIZE], eax
     jmp .training_key_done
     
 .set_learning_rate:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_float
     movss [r13 + OFF_LEARNING_RATE], xmm0
     jmp .training_key_done
     
 .set_weight_decay:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_float
     movss [r13 + OFF_WEIGHT_DECAY], xmm0
     jmp .training_key_done
     
 .set_early_stopping:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_bool
     mov [r13 + OFF_EARLY_STOPPING], eax
     jmp .training_key_done
     
 .set_patience:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_int
     mov [r13 + OFF_PATIENCE], eax
     jmp .training_key_done
 
 .set_lr_step_size:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_int
     mov [r13 + OFF_LR_STEP_SIZE], eax
     jmp .training_key_done
 
 .set_lr_gamma:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_float
     movss [r13 + OFF_LR_GAMMA], xmm0
     jmp .training_key_done
@@ -858,43 +858,43 @@ process_training_key:
     pop rbp
     ret
 
-; process_optimizer_key - Handle [optimizer] section keys
+; process_optimizer_key - Handle [rel optimizer] section keys
 process_optimizer_key:
     push rbp
     mov rbp, rsp
     
-    lea rdi, [key_buffer]
+    lea rdi, [rel key_buffer]
     
     ; Check type
-    lea rsi, [key_optimizer]
+    lea rsi, [rel key_optimizer]
     call str_equals_nocase
     test eax, eax
     jnz .set_optimizer_type
     
     ; Check momentum
-    lea rdi, [key_buffer]
-    lea rsi, [key_momentum]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_momentum]
     call str_equals_nocase
     test eax, eax
     jnz .set_momentum
     
     ; Check beta1
-    lea rdi, [key_buffer]
-    lea rsi, [key_beta1]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_beta1]
     call str_equals_nocase
     test eax, eax
     jnz .set_beta1
     
     ; Check beta2
-    lea rdi, [key_buffer]
-    lea rsi, [key_beta2]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_beta2]
     call str_equals_nocase
     test eax, eax
     jnz .set_beta2
     
     ; Check epsilon
-    lea rdi, [key_buffer]
-    lea rsi, [key_epsilon]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_epsilon]
     call str_equals_nocase
     test eax, eax
     jnz .set_epsilon
@@ -902,17 +902,17 @@ process_optimizer_key:
     jmp .optimizer_key_done
     
 .set_optimizer_type:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call str_to_lower
     
-    lea rdi, [value_buffer]
-    lea rsi, [opt_sgd]
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel opt_sgd]
     call str_equals_nocase
     test eax, eax
     jnz .opt_sgd_set
     
-    lea rdi, [value_buffer]
-    lea rsi, [opt_adam]
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel opt_adam]
     call str_equals_nocase
     test eax, eax
     jnz .opt_adam_set
@@ -928,25 +928,25 @@ process_optimizer_key:
     jmp .optimizer_key_done
     
 .set_momentum:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_float
     movss [r13 + OFF_MOMENTUM], xmm0
     jmp .optimizer_key_done
     
 .set_beta1:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_float
     movss [r13 + OFF_BETA1], xmm0
     jmp .optimizer_key_done
     
 .set_beta2:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_float
     movss [r13 + OFF_BETA2], xmm0
     jmp .optimizer_key_done
     
 .set_epsilon:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_float
     movss [r13 + OFF_EPSILON], xmm0
     jmp .optimizer_key_done
@@ -955,7 +955,7 @@ process_optimizer_key:
     pop rbp
     ret
 
-; process_data_key - Handle [data] section keys
+; process_data_key - Handle [rel data] section keys
 process_data_key:
     push rbp
     mov rbp, rsp
@@ -965,82 +965,82 @@ process_data_key:
     ; Get r13 from caller (it's a callee-saved register, so should still be config pointer)
     ; But save our copy to be safe
     
-    lea rdi, [key_buffer]
+    lea rdi, [rel key_buffer]
     
     ; Check train_file or train_data
-    lea rsi, [key_train_file]
+    lea rsi, [rel key_train_file]
     call str_equals_nocase
     test eax, eax
     jnz .set_train_file
-    lea rdi, [key_buffer]
-    lea rsi, [key_train_data]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_train_data]
     call str_equals_nocase
     test eax, eax
     jnz .set_train_file
     
     ; Check test_file or test_data or val_data
-    lea rdi, [key_buffer]
-    lea rsi, [key_test_file]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_test_file]
     call str_equals_nocase
     test eax, eax
     jnz .set_test_file
-    lea rdi, [key_buffer]
-    lea rsi, [key_test_data]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_test_data]
     call str_equals_nocase
     test eax, eax
     jnz .set_test_file
-    lea rdi, [key_buffer]
-    lea rsi, [key_val_data]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_val_data]
     call str_equals_nocase
     test eax, eax
     jnz .set_test_file
     
     ; Check train_label_file or train_labels
-    lea rdi, [key_buffer]
-    lea rsi, [key_train_label_file]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_train_label_file]
     call str_equals_nocase
     test eax, eax
     jnz .set_train_label_file
-    lea rdi, [key_buffer]
-    lea rsi, [key_train_labels]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_train_labels]
     call str_equals_nocase
     test eax, eax
     jnz .set_train_label_file
     
     ; Check test_label_file or test_labels or val_labels
-    lea rdi, [key_buffer]
-    lea rsi, [key_test_label_file]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_test_label_file]
     call str_equals_nocase
     test eax, eax
     jnz .set_test_label_file
-    lea rdi, [key_buffer]
-    lea rsi, [key_test_labels]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_test_labels]
     call str_equals_nocase
     test eax, eax
     jnz .set_test_label_file
-    lea rdi, [key_buffer]
-    lea rsi, [key_val_labels]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_val_labels]
     call str_equals_nocase
     test eax, eax
     jnz .set_test_label_file
     
     ; Check val_split
-    lea rdi, [key_buffer]
-    lea rsi, [key_val_split]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_val_split]
     call str_equals_nocase
     test eax, eax
     jnz .set_val_split
     
     ; Check shuffle
-    lea rdi, [key_buffer]
-    lea rsi, [key_shuffle]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_shuffle]
     call str_equals_nocase
     test eax, eax
     jnz .set_shuffle
     
     ; Check normalize
-    lea rdi, [key_buffer]
-    lea rsi, [key_normalize]
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_normalize]
     call str_equals_nocase
     test eax, eax
     jnz .set_normalize
@@ -1049,7 +1049,7 @@ process_data_key:
     
 .set_train_file:
     ; Allocate and copy string
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call str_length
     mov ebx, eax
     inc ebx                     ; null terminator
@@ -1061,12 +1061,12 @@ process_data_key:
     
     mov [r13 + OFF_TRAIN_FILE], rax
     mov rdi, rax
-    lea rsi, [value_buffer]
+    lea rsi, [rel value_buffer]
     call str_copy
     jmp .data_key_done
     
 .set_test_file:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call str_length
     mov ebx, eax
     inc ebx
@@ -1078,12 +1078,12 @@ process_data_key:
     
     mov [r13 + OFF_TEST_FILE], rax
     mov rdi, rax
-    lea rsi, [value_buffer]
+    lea rsi, [rel value_buffer]
     call str_copy
     jmp .data_key_done
     
 .set_train_label_file:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call str_length
     mov ebx, eax
     inc ebx
@@ -1095,12 +1095,12 @@ process_data_key:
     
     mov [r13 + OFF_TRAIN_LABEL_FILE], rax
     mov rdi, rax
-    lea rsi, [value_buffer]
+    lea rsi, [rel value_buffer]
     call str_copy
     jmp .data_key_done
     
 .set_test_label_file:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call str_length
     mov ebx, eax
     inc ebx
@@ -1112,24 +1112,24 @@ process_data_key:
     
     mov [r13 + OFF_TEST_LABEL_FILE], rax
     mov rdi, rax
-    lea rsi, [value_buffer]
+    lea rsi, [rel value_buffer]
     call str_copy
     jmp .data_key_done
     
 .set_val_split:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_float
     movss [r13 + OFF_VAL_SPLIT], xmm0
     jmp .data_key_done
     
 .set_shuffle:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_bool
     mov [r13 + OFF_SHUFFLE], eax
     jmp .data_key_done
     
 .set_normalize:
-    lea rdi, [value_buffer]
+    lea rdi, [rel value_buffer]
     call parse_bool
     mov [r13 + OFF_NORMALIZE], eax
     jmp .data_key_done
@@ -1153,14 +1153,14 @@ parse_int:
     xor ecx, ecx                ; sign flag
     
     ; Check for negative
-    mov dl, [rdi]
+    mov dl, [rel rdi]
     cmp dl, '-'
     jne .parse_int_loop
     mov ecx, 1
     inc rdi
     
 .parse_int_loop:
-    mov dl, [rdi]
+    mov dl, [rel rdi]
     cmp dl, '0'
     jb .parse_int_done
     cmp dl, '9'
@@ -1201,14 +1201,14 @@ parse_float:
     mov dword [rbp - 8], 0      ; in_fraction
     
     ; Check negative
-    mov al, [rdi]
+    mov al, [rel rdi]
     cmp al, '-'
     jne .float_integer
     mov dword [rbp - 4], 1
     inc rdi
     
 .float_integer:
-    mov al, [rdi]
+    mov al, [rel rdi]
     cmp al, '.'
     je .float_start_fraction
     cmp al, '0'
@@ -1234,7 +1234,7 @@ parse_float:
     cvtsi2ss xmm3, dword [rbp - 12] ; divisor = 10
     
 .float_fraction:
-    mov al, [rdi]
+    mov al, [rel rdi]
     cmp al, '0'
     jb .float_apply_sign
     cmp al, '9'
@@ -1284,19 +1284,19 @@ parse_bool:
     
     ; Check various true values
     mov rdi, r12
-    lea rsi, [str_true]
+    lea rsi, [rel str_true]
     call str_equals_nocase
     test eax, eax
     jnz .bool_true
     
     mov rdi, r12
-    lea rsi, [str_yes]
+    lea rsi, [rel str_yes]
     call str_equals_nocase
     test eax, eax
     jnz .bool_true
     
     mov rdi, r12
-    lea rsi, [str_1]
+    lea rsi, [rel str_1]
     call str_equals_nocase
     test eax, eax
     jnz .bool_true
@@ -1320,7 +1320,7 @@ str_to_lower:
     mov rbp, rsp
     
 .lower_loop:
-    mov al, [rdi]
+    mov al, [rel rdi]
     test al, al
     jz .lower_done
     
@@ -1330,7 +1330,7 @@ str_to_lower:
     ja .lower_next
     
     add al, 32                  ; to lowercase
-    mov [rdi], al
+    mov [rel rdi], al
     
 .lower_next:
     inc rdi
@@ -1351,8 +1351,8 @@ str_equals_nocase:
     mov rbp, rsp
     
 .cmp_loop:
-    mov al, [rdi]
-    mov cl, [rsi]
+    mov al, [rel rdi]
+    mov cl, [rel rsi]
     
     ; Convert both to lowercase
     cmp al, 'A'
@@ -1421,8 +1421,8 @@ str_copy:
     mov rbp, rsp
     
 .copy_loop:
-    mov al, [rsi]
-    mov [rdi], al
+    mov al, [rel rsi]
+    mov [rel rdi], al
     test al, al
     jz .copy_done
     inc rdi

@@ -55,6 +55,8 @@ global mse_loss
 global mse_loss_backward
 global cross_entropy_loss
 global cross_entropy_loss_backward
+global bce_loss
+global bce_loss_backward
 
 ; =============================================================================
 ; mse_loss - Mean Squared Error loss
@@ -79,7 +81,7 @@ mse_loss:
     
     ; Get prediction tensor
     mov rax, [r12 + NODE_VALUE]
-    mov [rsp], rax                  ; pred tensor
+    mov [rel rsp], rax                  ; pred tensor
     mov r14, rax
     
     ; Get element count
@@ -132,17 +134,17 @@ mse_loss:
     je .mean_f32
     
     ; float64
-    movsd xmm0, [rdi]
+    movsd xmm0, [rel rdi]
     cvtsi2sd xmm1, r15
     divsd xmm0, xmm1
-    movsd [rdi], xmm0
+    movsd [rel rdi], xmm0
     jmp .create_loss_node
 
 .mean_f32:
-    movss xmm0, [rdi]
+    movss xmm0, [rel rdi]
     cvtsi2ss xmm1, r15
     divss xmm0, xmm1
-    movss [rdi], xmm0
+    movss [rel rdi], xmm0
 
 .create_loss_node:
     mov rdi, [rsp+24]
@@ -163,7 +165,7 @@ mse_loss:
     call mem_alloc
     pop rcx
     mov [rcx + NODE_PARENTS], rax
-    mov [rax], r12                  ; parent[0] = pred
+    mov [rel rax], r12                  ; parent[0] = pred
     mov [rax + 8], r13              ; parent[1] = target
     
     ; Save diff tensor for backward
@@ -173,7 +175,7 @@ mse_loss:
     pop rcx
     mov [rcx + NODE_SAVED_TENSORS], rax
     mov rdx, [rsp+8]                ; diff tensor
-    mov [rax], rdx
+    mov [rel rax], rdx
     mov qword [rcx + NODE_N_SAVED], 1
     
     mov rax, [rsp+32]
@@ -223,19 +225,19 @@ mse_loss_backward:
     mov r14, [r12 + NODE_PARENTS]
     
     ; Get pred node and its grad
-    mov rax, [r14]                  ; pred node
+    mov rax, [rel r14]                  ; pred node
     mov r15, [rax + NODE_GRAD]
     test r15, r15
     jz .done
     
     ; Get saved diff tensor (pred - target)
     mov rax, [r12 + NODE_SAVED_TENSORS]
-    mov rbx, [rax]                  ; diff tensor
+    mov rbx, [rel rax]                  ; diff tensor
     
     ; Get numel
     mov rdi, rbx
     call tensor_numel
-    mov [rsp], rax                  ; numel
+    mov [rel rsp], rax                  ; numel
     
     ; Get dL/dloss value
     mov rdi, [r13 + TENSOR_DATA]
@@ -245,25 +247,25 @@ mse_loss_backward:
     je .bwd_f32
     
     ; float64
-    movsd xmm0, [rdi]               ; dL/dloss
+    movsd xmm0, [rel rdi]               ; dL/dloss
     
     ; Compute scale = 2 * dL/dloss / numel
     mulsd xmm0, [rel two_f64]
-    cvtsi2sd xmm1, qword [rsp]
+    cvtsi2sd xmm1, qword [rel rsp]
     divsd xmm0, xmm1                ; scale = 2 * dL/dloss / n
     
     ; grad_pred += scale * diff
     mov rdi, [r15 + TENSOR_DATA]
     mov rsi, [rbx + TENSOR_DATA]
-    mov rcx, [rsp]
+    mov rcx, [rel rsp]
     
     xor r8, r8
 .bwd_f64_loop:
     cmp r8, rcx
     jge .done
     
-    movsd xmm1, [rsi + r8*8]        ; diff[i]
-    mulsd xmm1, xmm0                ; scale * diff[i]
+    movsd xmm1, [rsi + r8*8]        ; diff[rel i]
+    mulsd xmm1, xmm0                ; scale * diff[rel i]
     addsd xmm1, [rdi + r8*8]
     movsd [rdi + r8*8], xmm1
     
@@ -271,16 +273,16 @@ mse_loss_backward:
     jmp .bwd_f64_loop
 
 .bwd_f32:
-    movss xmm0, [rdi]
+    movss xmm0, [rel rdi]
     cvtss2sd xmm0, xmm0
     mulsd xmm0, [rel two_f64]
-    cvtsi2sd xmm1, qword [rsp]
+    cvtsi2sd xmm1, qword [rel rsp]
     divsd xmm0, xmm1
     cvtsd2ss xmm0, xmm0
     
     mov rdi, [r15 + TENSOR_DATA]
     mov rsi, [rbx + TENSOR_DATA]
-    mov rcx, [rsp]
+    mov rcx, [rel rsp]
     
     xor r8, r8
 .bwd_f32_loop:
@@ -328,12 +330,12 @@ cross_entropy_loss:
     
     ; Get logits tensor
     mov rax, [r12 + NODE_VALUE]
-    mov [rsp], rax                  ; logits tensor
+    mov [rel rsp], rax                  ; logits tensor
     mov r14, rax
     
     ; Get shape
     mov rax, [r14 + TENSOR_SHAPE]
-    mov rcx, [rax]                  ; batch_size
+    mov rcx, [rel rax]                  ; batch_size
     mov [rsp+8], rcx
     mov rcx, [rax + 8]              ; num_classes
     mov [rsp+16], rcx
@@ -372,7 +374,7 @@ cross_entropy_loss:
     add rdi, rcx
     
     mov r8, [rsp+16]                ; num_classes
-    movsd xmm0, [rsi]               ; max = logits[0]
+    movsd xmm0, [rel rsi]               ; max = logits[0]
     mov r9, 1
 .find_max_f64:
     cmp r9, r8
@@ -449,7 +451,7 @@ cross_entropy_loss:
     add rdi, rcx
     
     mov r8, [rsp+16]
-    movss xmm0, [rsi]
+    movss xmm0, [rel rsi]
     mov r9, 1
 .find_max_f32:
     cmp r9, r8
@@ -515,7 +517,7 @@ cross_entropy_loss:
     jmp .softmax_f32_batch
 
 .compute_loss:
-    ; Compute -log(softmax[target]) for each sample and average
+    ; Compute -log(softmax[rel target]) for each sample and average
     mov qword [rsp+48], 1
     mov rdi, 1
     lea rsi, [rsp+48]
@@ -582,7 +584,7 @@ cross_entropy_loss:
     
     mov rdi, [rsp+64]
     mov rdi, [rdi + TENSOR_DATA]
-    movsd [rdi], xmm0
+    movsd [rel rdi], xmm0
     jmp .create_node
 
 .loss_f32:
@@ -635,7 +637,7 @@ cross_entropy_loss:
     
     mov rdi, [rsp+64]
     mov rdi, [rdi + TENSOR_DATA]
-    movss [rdi], xmm0
+    movss [rel rdi], xmm0
 
 .create_node:
     mov rdi, [rsp+64]
@@ -656,7 +658,7 @@ cross_entropy_loss:
     call mem_alloc
     pop rcx
     mov [rcx + NODE_PARENTS], rax
-    mov [rax], r12
+    mov [rel rax], r12
     
     ; Save softmax and target for backward
     push rcx
@@ -665,7 +667,7 @@ cross_entropy_loss:
     pop rcx
     mov [rcx + NODE_SAVED_TENSORS], rax
     mov rdx, [rsp+24]               ; softmax tensor
-    mov [rax], rdx
+    mov [rel rax], rdx
     mov [rax + 8], r13              ; target indices
     mov qword [rcx + NODE_N_SAVED], 2
     
@@ -710,20 +712,20 @@ cross_entropy_loss_backward:
     
     ; Get parent (logits) grad
     mov rax, [r12 + NODE_PARENTS]
-    mov rax, [rax]                  ; logits node
+    mov rax, [rel rax]                  ; logits node
     mov r14, [rax + NODE_GRAD]
     test r14, r14
     jz .done
     
     ; Get saved tensors
     mov rax, [r12 + NODE_SAVED_TENSORS]
-    mov r15, [rax]                  ; softmax tensor
+    mov r15, [rel rax]                  ; softmax tensor
     mov rbx, [rax + 8]              ; target indices tensor
     
     ; Get shape
     mov rax, [r15 + TENSOR_SHAPE]
-    mov rcx, [rax]                  ; batch_size
-    mov [rsp], rcx
+    mov rcx, [rel rax]                  ; batch_size
+    mov [rel rsp], rcx
     mov rcx, [rax + 8]              ; num_classes
     mov [rsp+8], rcx
     
@@ -735,15 +737,15 @@ cross_entropy_loss_backward:
     je .bwd_f32
     
     ; float64: grad = (softmax - one_hot) * dL/dloss / batch_size
-    movsd xmm2, [rdi]               ; dL/dloss
-    cvtsi2sd xmm3, qword [rsp]      ; batch_size
+    movsd xmm2, [rel rdi]               ; dL/dloss
+    cvtsi2sd xmm3, qword [rel rsp]      ; batch_size
     divsd xmm2, xmm3                ; scale = dL/dloss / batch
     
     mov rdi, [r14 + TENSOR_DATA]    ; grad data
     mov rsi, [r15 + TENSOR_DATA]    ; softmax data
     mov rdx, [rbx + TENSOR_DATA]    ; target indices
     
-    mov rcx, [rsp]                  ; batch_size
+    mov rcx, [rel rsp]                  ; batch_size
     mov r8, [rsp+8]                 ; num_classes
     
     xor r9, r9                      ; batch idx
@@ -784,9 +786,9 @@ cross_entropy_loss_backward:
     jmp .bwd_f64_batch
 
 .bwd_f32:
-    movss xmm2, [rdi]
+    movss xmm2, [rel rdi]
     cvtss2sd xmm2, xmm2
-    cvtsi2sd xmm3, qword [rsp]
+    cvtsi2sd xmm3, qword [rel rsp]
     divsd xmm2, xmm3
     cvtsd2ss xmm2, xmm2
     
@@ -794,7 +796,7 @@ cross_entropy_loss_backward:
     mov rsi, [r15 + TENSOR_DATA]
     mov rdx, [rbx + TENSOR_DATA]
     
-    mov rcx, [rsp]
+    mov rcx, [rel rsp]
     mov r8, [rsp+8]
     
     xor r9, r9
@@ -848,5 +850,405 @@ cross_entropy_loss_backward:
     pop rbx
     pop rbp
     ret
+
+; =============================================================================
+; bce_loss - Binary Cross-Entropy loss
+; Arguments:
+;   RDI = Node* pred (predictions, after sigmoid, values in [0,1])
+;   RSI = Tensor* target (ground truth, binary 0/1)
+; Returns:
+;   RAX = Node* loss (scalar)
+; Formula: -mean(target * log(pred) + (1-target) * log(1-pred))
+; =============================================================================
+bce_loss:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 72
+    
+    mov r12, rdi                    ; pred node
+    mov r13, rsi                    ; target tensor
+    
+    ; Get prediction tensor
+    mov rax, [r12 + NODE_VALUE]
+    mov [rel rsp], rax                  ; pred tensor
+    mov r14, rax
+    
+    ; Get element count (batch_size)
+    mov rdi, r14
+    call tensor_numel
+    mov r15, rax                    ; numel
+    mov [rsp+8], rax
+    
+    ; Create scalar output for loss
+    mov qword [rsp+16], 1
+    mov rdi, 1
+    lea rsi, [rsp+16]
+    mov edx, [r14 + TENSOR_DTYPE]
+    call tensor_create
+    mov [rsp+24], rax               ; loss tensor
+    
+    ; Compute BCE loss element by element and sum
+    mov rdi, [r14 + TENSOR_DATA]    ; pred data
+    mov rsi, [r13 + TENSOR_DATA]    ; target data
+    mov rcx, r15                    ; numel
+    
+    mov eax, [r14 + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .bce_f32
+    
+    ; float64
+    vxorpd xmm2, xmm2, xmm2         ; sum = 0
+    xor r8, r8
+.bce_f64_loop:
+    cmp r8, rcx
+    jge .bce_f64_store
+    
+    push rdi
+    push rsi
+    push rcx
+    push r8
+    
+    ; loss_i = target * log(pred + eps) + (1-target) * log(1-pred + eps)
+    movsd xmm0, [rdi + r8*8]        ; pred
+    addsd xmm0, [rel eps_f64]       ; pred + eps
+    sub rsp, 8
+    call log wrt ..plt
+    add rsp, 8
+    movsd xmm3, xmm0                ; log(pred + eps)
+    
+    pop r8
+    pop rcx
+    pop rsi
+    pop rdi
+    
+    movsd xmm4, [rsi + r8*8]        ; target
+    mulsd xmm3, xmm4                ; target * log(pred + eps)
+    
+    push rdi
+    push rsi
+    push rcx
+    push r8
+    push rbx
+    movsd xmm5, xmm3                ; save term1
+    
+    movsd xmm0, [rel one_f64]
+    subsd xmm0, [rdi + r8*8]        ; 1 - pred
+    addsd xmm0, [rel eps_f64]       ; + eps
+    sub rsp, 8
+    call log wrt ..plt
+    add rsp, 8
+    movsd xmm3, xmm0                ; log(1 - pred + eps)
+    
+    pop rbx
+    pop r8
+    pop rcx
+    pop rsi
+    pop rdi
+    
+    movsd xmm0, [rel one_f64]
+    subsd xmm0, [rsi + r8*8]        ; 1 - target
+    mulsd xmm3, xmm0                ; (1-target) * log(1-pred + eps)
+    
+    ; Restore term1 from xmm5 (need to save/restore through calls)
+    ; Actually we saved to stack, let's use a different approach
+    ; Recalculate term1 inline
+    push rdi
+    push rsi
+    push rcx
+    push r8
+    movsd xmm0, [rdi + r8*8]
+    addsd xmm0, [rel eps_f64]
+    sub rsp, 8
+    call log wrt ..plt
+    add rsp, 8
+    pop r8
+    pop rcx
+    pop rsi
+    pop rdi
+    mulsd xmm0, [rsi + r8*8]        ; target * log(pred)
+    
+    ; Now we have term1 in xmm0, need term2
+    ; term2 = (1-target) * log(1-pred)
+    push rdi
+    push rsi
+    push rcx
+    push r8
+    movsd [rsp+48], xmm0            ; save term1
+    
+    movsd xmm0, [rel one_f64]
+    subsd xmm0, [rdi + r8*8]
+    addsd xmm0, [rel eps_f64]
+    sub rsp, 8
+    call log wrt ..plt
+    add rsp, 8
+    
+    pop r8
+    pop rcx
+    pop rsi
+    pop rdi
+    
+    movsd xmm1, [rel one_f64]
+    subsd xmm1, [rsi + r8*8]        ; 1 - target
+    mulsd xmm0, xmm1                ; term2
+    
+    movsd xmm1, [rsp+48]            ; term1
+    addsd xmm0, xmm1                ; term1 + term2
+    
+    ; Negate (BCE is negative log likelihood)
+    movsd xmm1, [rel neg_one_f64]
+    mulsd xmm0, xmm1
+    
+    addsd xmm2, xmm0                ; accumulate
+    
+    inc r8
+    jmp .bce_f64_loop
+
+.bce_f64_store:
+    ; Average over batch
+    cvtsi2sd xmm1, qword [rsp+8]
+    divsd xmm2, xmm1
+    
+    mov rdi, [rsp+24]
+    mov rdi, [rdi + TENSOR_DATA]
+    movsd [rel rdi], xmm2
+    jmp .bce_create_node
+
+.bce_f32:
+    vxorps xmm2, xmm2, xmm2
+    xor r8, r8
+.bce_f32_loop:
+    cmp r8, rcx
+    jge .bce_f32_store
+    
+    push rdi
+    push rsi
+    push rcx
+    push r8
+    
+    ; term1: target * log(pred + eps)
+    movss xmm0, [rdi + r8*4]
+    cvtss2sd xmm0, xmm0
+    addsd xmm0, [rel eps_f64]
+    sub rsp, 8
+    call log wrt ..plt
+    add rsp, 8
+    
+    pop r8
+    pop rcx
+    pop rsi
+    pop rdi
+    
+    movss xmm1, [rsi + r8*4]
+    cvtss2sd xmm1, xmm1
+    mulsd xmm0, xmm1
+    movsd [rsp+48], xmm0            ; save term1
+    
+    push rdi
+    push rsi
+    push rcx
+    push r8
+    
+    ; term2: (1-target) * log(1-pred + eps)
+    movss xmm0, [rdi + r8*4]
+    cvtss2sd xmm0, xmm0
+    movsd xmm1, [rel one_f64]
+    subsd xmm1, xmm0                ; 1 - pred
+    addsd xmm1, [rel eps_f64]
+    movsd xmm0, xmm1
+    sub rsp, 8
+    call log wrt ..plt
+    add rsp, 8
+    
+    pop r8
+    pop rcx
+    pop rsi
+    pop rdi
+    
+    movss xmm1, [rsi + r8*4]
+    cvtss2sd xmm1, xmm1
+    movsd xmm3, [rel one_f64]
+    subsd xmm3, xmm1                ; 1 - target
+    mulsd xmm0, xmm3                ; term2
+    
+    movsd xmm1, [rsp+48]            ; term1
+    addsd xmm0, xmm1
+    
+    ; Negate
+    movsd xmm1, [rel neg_one_f64]
+    mulsd xmm0, xmm1
+    
+    addsd xmm2, xmm0
+    
+    inc r8
+    jmp .bce_f32_loop
+
+.bce_f32_store:
+    cvtsi2sd xmm1, qword [rsp+8]
+    divsd xmm2, xmm1
+    cvtsd2ss xmm2, xmm2
+    
+    mov rdi, [rsp+24]
+    mov rdi, [rdi + TENSOR_DATA]
+    movss [rel rdi], xmm2
+
+.bce_create_node:
+    mov rdi, [rsp+24]
+    mov rsi, 1
+    call node_create
+    test rax, rax
+    jz .bce_failed
+    mov [rsp+32], rax
+    
+    ; Set backward function
+    lea rcx, [rel bce_loss_backward]
+    mov [rax + NODE_BACKWARD_FN], rcx
+    
+    ; Set parent (pred node)
+    mov dword [rax + NODE_N_PARENTS], 1
+    push rax
+    mov rdi, 8
+    call mem_alloc
+    pop rcx
+    mov [rcx + NODE_PARENTS], rax
+    mov [rel rax], r12
+    
+    ; Save target tensor for backward
+    push rcx
+    mov rdi, 8
+    call mem_alloc
+    pop rcx
+    mov [rcx + NODE_SAVED_TENSORS], rax
+    mov [rel rax], r13
+    mov qword [rcx + NODE_N_SAVED], 1
+    
+    mov rax, [rsp+32]
+    jmp .bce_done
+
+.bce_failed:
+    xor eax, eax
+
+.bce_done:
+    add rsp, 72
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; bce_loss_backward - Backward for BCE loss
+; dL/dpred = (pred - target) / (pred * (1 - pred) + eps) / batch_size
+; Simplified: = (pred - target) / batch_size for sigmoid output
+; =============================================================================
+bce_loss_backward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 24
+    
+    mov r12, rdi                    ; self node
+    mov r13, [r12 + NODE_GRAD]      ; dL/dloss (scalar)
+    
+    ; Get parent (pred) grad
+    mov rax, [r12 + NODE_PARENTS]
+    mov rax, [rel rax]                  ; pred node
+    mov r14, [rax + NODE_GRAD]
+    test r14, r14
+    jz .bce_bwd_done
+    
+    ; Get pred tensor value
+    mov rax, [r12 + NODE_PARENTS]
+    mov rax, [rel rax]
+    mov r15, [rax + NODE_VALUE]     ; pred tensor
+    
+    ; Get saved target tensor
+    mov rax, [r12 + NODE_SAVED_TENSORS]
+    mov rbx, [rel rax]                  ; target tensor
+    
+    ; Get batch size
+    mov rdi, r15
+    call tensor_numel
+    mov [rel rsp], rax                  ; batch_size
+    
+    ; Get dL/dloss value
+    mov rdi, [r13 + TENSOR_DATA]
+    mov eax, [r13 + TENSOR_DTYPE]
+    
+    cmp eax, DT_FLOAT32
+    je .bce_bwd_f32
+    
+    ; float64
+    movsd xmm2, [rel rdi]               ; dL/dloss
+    cvtsi2sd xmm3, qword [rel rsp]
+    divsd xmm2, xmm3                ; scale = dL/dloss / batch
+    
+    mov rdi, [r14 + TENSOR_DATA]    ; grad data
+    mov rsi, [r15 + TENSOR_DATA]    ; pred data
+    mov rdx, [rbx + TENSOR_DATA]    ; target data
+    mov rcx, [rel rsp]
+    
+    xor r8, r8
+.bce_bwd_f64_loop:
+    cmp r8, rcx
+    jge .bce_bwd_done
+    
+    ; grad = (pred - target) / (pred * (1-pred) + eps) * scale
+    ; Simplified for sigmoid output: grad = (pred - target) * scale
+    movsd xmm0, [rsi + r8*8]        ; pred
+    subsd xmm0, [rdx + r8*8]        ; pred - target
+    mulsd xmm0, xmm2                ; * scale
+    addsd xmm0, [rdi + r8*8]        ; accumulate
+    movsd [rdi + r8*8], xmm0
+    
+    inc r8
+    jmp .bce_bwd_f64_loop
+
+.bce_bwd_f32:
+    movss xmm2, [rel rdi]
+    cvtss2sd xmm2, xmm2
+    cvtsi2sd xmm3, qword [rel rsp]
+    divsd xmm2, xmm3
+    cvtsd2ss xmm2, xmm2
+    
+    mov rdi, [r14 + TENSOR_DATA]
+    mov rsi, [r15 + TENSOR_DATA]
+    mov rdx, [rbx + TENSOR_DATA]
+    mov rcx, [rel rsp]
+    
+    xor r8, r8
+.bce_bwd_f32_loop:
+    cmp r8, rcx
+    jge .bce_bwd_done
+    
+    movss xmm0, [rsi + r8*4]
+    subss xmm0, [rdx + r8*4]
+    mulss xmm0, xmm2
+    addss xmm0, [rdi + r8*4]
+    movss [rdi + r8*4], xmm0
+    
+    inc r8
+    jmp .bce_bwd_f32_loop
+
+.bce_bwd_done:
+    add rsp, 24
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
 ; Mark stack as non-executable
 section .note.GNU-stack noalloc noexec nowrite progbits

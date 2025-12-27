@@ -8,8 +8,8 @@ section .data
     align 8
 
     ; Messages
-    msg_verify_start:   db "[VERIFY] Starting mathematical verification...", 10, 0
-    msg_verify_end:     db "[VERIFY] Verification complete", 10, 0
+    msg_verify_start:   db "[rel VERIFY] Starting mathematical verification...", 10, 0
+    msg_verify_end:     db "[rel VERIFY] Verification complete", 10, 0
 
 section .text
 
@@ -30,14 +30,14 @@ verify_mathematical_correctness:
 
     mov rdi, msg_verify_start
     xor eax, eax
-    call printf
+    call printf wrt ..plt
 
     ; Use the existing gradient checking framework
     call run_gradient_checks
 
     mov rdi, msg_verify_end
     xor eax, eax
-    call printf
+    call printf wrt ..plt
 
     pop rbp
     ret

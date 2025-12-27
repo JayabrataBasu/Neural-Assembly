@@ -15,6 +15,8 @@ extern backward
 extern zero_grad
 extern node_relu
 extern node_softmax
+extern node_sigmoid
+extern node_tanh
 extern dataset_shuffle_indices
 extern dataset_shuffle
 extern time
@@ -25,7 +27,11 @@ extern time
     global autograd_zero_grad
     global relu_forward
     global softmax_forward
+    global sigmoid_forward
+    global tanh_forward
     global dataset_load
+    global dataset_size
+    global optimizer_step
     global mem_init
     global xorshift_seed
     global xorshift64
@@ -56,10 +62,28 @@ relu_forward:
 softmax_forward:
     jmp node_softmax
 
+; sigmoid_forward -> node_sigmoid
+sigmoid_forward:
+    jmp node_sigmoid
+
+; tanh_forward -> node_tanh
+tanh_forward:
+    jmp node_tanh
+
 ; dataset_load - placeholder
 ; For now return NULL (no dataset). Caller should handle NULL.
 dataset_load:
     xor rax, rax
+    ret
+
+; dataset_size - placeholder (returns 0)
+dataset_size:
+    xor eax, eax
+    ret
+
+; optimizer_step - placeholder (does nothing, returns 0)
+optimizer_step:
+    xor eax, eax
     ret
 
 ; mem_init - no-op initializer for memory subsystem

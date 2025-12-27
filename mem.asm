@@ -110,7 +110,7 @@ mem_alloc_aligned:
 .align_ok:
     
     ; posix_memalign(void **memptr, size_t alignment, size_t size)
-    lea rdi, [rsp]          ; memptr - address of local variable
+    lea rdi, [rel rsp]          ; memptr - address of local variable
     mov rsi, r12            ; alignment
     mov rdx, rbx            ; size
     call posix_memalign wrt ..plt
@@ -120,7 +120,7 @@ mem_alloc_aligned:
     jnz .aligned_alloc_failed
     
     ; Get the allocated pointer
-    mov rax, [rsp]
+    mov rax, [rel rsp]
     
     add rsp, 24
     pop r12

@@ -274,7 +274,7 @@ tensor_create:
     
     ; Compute row-major strides
     ; stride[ndim-1] = 1
-    ; stride[i] = stride[i+1] * shape[i+1]
+    ; stride[rel i] = stride[i+1] * shape[i+1]
     mov rsi, [r15 + TENSOR_STRIDE]
     mov rdi, [r15 + TENSOR_SHAPE]
     
@@ -288,10 +288,10 @@ tensor_create:
 .compute_strides:
     dec rcx
     js .strides_done
-    ; stride[i] = stride[i+1] * shape[i+1]
+    ; stride[rel i] = stride[i+1] * shape[i+1]
     mov rax, [rsi + rcx*8 + 8]      ; stride[i+1]
     imul rax, [rdi + rcx*8 + 8]     ; * shape[i+1]
-    mov [rsi + rcx*8], rax          ; stride[i]
+    mov [rsi + rcx*8], rax          ; stride[rel i]
     jmp .compute_strides
 
 .strides_done:
@@ -522,7 +522,7 @@ tensor_fill:
     jz .done
     
     mov r12, rdi                    ; tensor pointer
-    movsd [rsp], xmm0               ; Save value on stack
+    movsd [rel rsp], xmm0               ; Save value on stack
     
     ; Get number of elements
     call tensor_numel
@@ -534,7 +534,7 @@ tensor_fill:
     ; Get data pointer
     mov rbx, [r12 + TENSOR_DATA]
     mov ecx, [r12 + TENSOR_DTYPE]
-    movsd xmm0, [rsp]               ; Restore value
+    movsd xmm0, [rel rsp]               ; Restore value
     
     cmp ecx, DT_FLOAT32
     je .fill_float32

@@ -36,16 +36,16 @@ section .data
     mode_read:          db "r", 0
     csv_delim:          db ",", 0
     newline_char:       db 10, 0
-    dbg_samples:        db "[DBG] n_samples = ", 0
-    dbg_features:       db "[DBG] n_features = ", 0
+    dbg_samples:        db "[rel DBG] n_samples = ", 0
+    dbg_features:       db "[rel DBG] n_features = ", 0
     dbg_nl:             db 10, 0
-    dbg_label_path:     db "[DBG] Label path: ", 0
-    dbg_line_content:   db "[DBG] Line content: ", 0
-    dbg_float_val:      db "[DBG] Float val: ", 0
-    dbg_dtype:          db "[DBG] dtype: ", 0
-    dbg_storing_f32:    db "[DBG] Storing f32", 0
-    dbg_labels_tensor_val: db "[DBG] Labels tensor[0]: ", 0
-    dbg_batch_y_val:    db "[DBG] Batch Y[0]: ", 0
+    dbg_label_path:     db "[rel DBG] Label path: ", 0
+    dbg_line_content:   db "[rel DBG] Line content: ", 0
+    dbg_float_val:      db "[rel DBG] Float val: ", 0
+    dbg_dtype:          db "[rel DBG] dtype: ", 0
+    dbg_storing_f32:    db "[rel DBG] Storing f32", 0
+    dbg_labels_tensor_val: db "[rel DBG] Labels tensor[0]: ", 0
+    dbg_batch_y_val:    db "[rel DBG] Batch Y[0]: ", 0
 
 section .bss
     align 8
@@ -122,10 +122,10 @@ dataset_create:
     mov qword [rbx + DATASET_N_CLASSES], 0
     
     ; Create data tensor (n_samples x n_features)
-    mov [rsp], r12                  ; shape[0]
+    mov [rel rsp], r12                  ; shape[0]
     mov [rsp+8], r13                ; shape[1]
     mov rdi, 2
-    lea rsi, [rsp]
+    lea rsi, [rel rsp]
     mov edx, r14d
     call tensor_create
     mov [rbx + DATASET_DATA], rax
@@ -173,13 +173,13 @@ dataset_load_csv:
     push r15
     sub rsp, 88                     ; Align stack (5 pushes = 40 bytes, need 8 more + 80 = 128 bytes aligned)
     
-    mov [rsp], rdi                  ; data_path
+    mov [rel rsp], rdi                  ; data_path
     mov [rsp+8], rsi                ; label_path
     mov [rsp+16], rdx               ; n_features
     mov [rsp+24], ecx               ; dtype
     
     ; First pass: count lines in data file
-    mov rdi, [rsp]
+    mov rdi, [rel rsp]
     lea rsi, [rel mode_read]
     call fopen wrt ..plt
     test rax, rax
@@ -249,7 +249,7 @@ dataset_load_csv:
     mov r15, rax                    ; labels tensor
     
     ; Re-open and parse data file
-    mov rdi, [rsp]
+    mov rdi, [rel rsp]
     lea rsi, [rel mode_read]
     call fopen wrt ..plt
     test rax, rax
@@ -482,7 +482,7 @@ dataset_get_batch:
     mov r12, rdi                    ; dataset
     mov r13, rsi                    ; batch_index
     mov r14, rdx                    ; batch_size
-    mov [rsp], rcx                  ; out_x
+    mov [rel rsp], rcx                  ; out_x
     mov [rsp+8], r8                 ; out_y
     
     ; Calculate start index
@@ -558,9 +558,9 @@ dataset_get_batch:
 
 .copy_y:
     ; Store batch_x
-    mov rax, [rsp]                  ; out_x
+    mov rax, [rel rsp]                  ; out_x
     mov rcx, [rsp+48]
-    mov [rax], rcx
+    mov [rel rax], rcx
     
     ; Create batch Y tensor if labels exist
     mov rax, [r12 + DATASET_LABELS]
@@ -607,12 +607,12 @@ dataset_get_batch:
 .store_y:
     mov rax, [rsp+8]                ; out_y
     mov rcx, [rsp+48]
-    mov [rax], rcx
+    mov [rel rax], rcx
     jmp .done
 
 .no_batch_labels:
     mov rax, [rsp+8]
-    mov qword [rax], 0
+    mov qword [rel rax], 0
 
 .done:
     add rsp, 56
@@ -626,10 +626,10 @@ dataset_get_batch:
 
 .batch_alloc_failed:
     ; Set output pointers to NULL and return
-    mov rax, [rsp]                  ; out_x
-    mov qword [rax], 0
+    mov rax, [rel rsp]                  ; out_x
+    mov qword [rel rax], 0
     mov rax, [rsp+8]                ; out_y  
-    mov qword [rax], 0
+    mov qword [rel rax], 0
     jmp .done
 
 ; =============================================================================
@@ -661,7 +661,7 @@ dataset_shuffle_indices:
     jmp .init_loop
 
 .shuffle:
-    ; Fisher-Yates shuffle: for i = n-1 down to 1, swap arr[i] with arr[rand(0..i)]
+    ; Fisher-Yates shuffle: for i = n-1 down to 1, swap arr[rel i] with arr[rand(0..i)]
     mov r12, rbx                    ; i = n_samples
     dec r12                         ; i = n_samples - 1
 
@@ -673,11 +673,11 @@ dataset_shuffle_indices:
     lea rdi, [r12 + 1]              ; rdi = i + 1 (exclusive upper bound)
     call rand_range                 ; rax = random in [0, i]
     
-    ; Swap arr[i] and arr[j]
-    mov rcx, [r13 + r12*8]          ; rcx = arr[i]
-    mov rdx, [r13 + rax*8]          ; rdx = arr[j]
-    mov [r13 + r12*8], rdx          ; arr[i] = arr[j]
-    mov [r13 + rax*8], rcx          ; arr[j] = arr[i]
+    ; Swap arr[rel i] and arr[rel j]
+    mov rcx, [r13 + r12*8]          ; rcx = arr[rel i]
+    mov rdx, [r13 + rax*8]          ; rdx = arr[rel j]
+    mov [r13 + r12*8], rdx          ; arr[rel i] = arr[rel j]
+    mov [r13 + rax*8], rcx          ; arr[rel j] = arr[rel i]
     
     dec r12
     jmp .shuffle_loop
@@ -724,7 +724,7 @@ dataset_shuffle:
     ; Get row size in bytes (n_features * 4 for float32)
     mov rax, r13
     shl rax, 2                      ; * 4 (float32)
-    mov [rsp], rax                  ; row_size
+    mov [rel rsp], rax                  ; row_size
     
     ; Allocate temp buffer for swapping rows
     mov rdi, rax
@@ -766,7 +766,7 @@ dataset_shuffle:
     je .next_iter                   ; i == j, no swap needed
     
     ; Swap data rows: row_i <-> row_j
-    mov rdi, [rsp]                  ; row_size
+    mov rdi, [rel rsp]                  ; row_size
     mov rsi, [rsp+16]               ; data_ptr
     
     ; Calculate row_i address = data_ptr + i * row_size
@@ -784,19 +784,19 @@ dataset_shuffle:
     ; Copy row_i to temp
     mov rdi, [rsp+8]                ; temp
     mov rsi, [rsp+48]               ; row_i
-    mov rcx, [rsp]
+    mov rcx, [rel rsp]
     rep movsb
     
     ; Copy row_j to row_i
     mov rdi, [rsp+48]               ; row_i
     mov rsi, [rsp+56]               ; row_j
-    mov rcx, [rsp]
+    mov rcx, [rel rsp]
     rep movsb
     
     ; Copy temp to row_j
     mov rdi, [rsp+56]               ; row_j
     mov rsi, [rsp+8]                ; temp
-    mov rcx, [rsp]
+    mov rcx, [rel rsp]
     rep movsb
     
     ; Swap labels if present
@@ -807,15 +807,15 @@ dataset_shuffle:
     mov rcx, [rsp+32]               ; i
     mov rdx, [rsp+40]               ; j
     
-    ; Swap labels[i] and labels[j] (4 bytes each for float32)
+    ; Swap labels[rel i] and labels[rel j] (4 bytes each for float32)
     mov rsi, rax
-    lea rdi, [rsi + rcx*4]          ; &labels[i]
-    lea rsi, [rax + rdx*4]          ; &labels[j]
+    lea rdi, [rsi + rcx*4]          ; &labels[rel i]
+    lea rsi, [rax + rdx*4]          ; &labels[rel j]
     
-    mov eax, [rdi]
-    mov ecx, [rsi]
-    mov [rdi], ecx
-    mov [rsi], eax
+    mov eax, [rel rdi]
+    mov ecx, [rel rsi]
+    mov [rel rdi], ecx
+    mov [rel rsi], eax
     
 .next_iter:
     dec qword [rsp+32]

@@ -12,8 +12,8 @@ section .data
                         db "========================================", 10, 0
     
     msg_test_sep:       db "----------------------------------------", 10, 0
-    msg_pass:           db "[PASS] ", 0
-    msg_fail:           db "[FAIL] ", 0
+    msg_pass:           db "[rel PASS] ", 0
+    msg_fail:           db "[rel FAIL] ", 0
     msg_running:        db "[....] ", 0
     msg_newline:        db 10, 0
     
@@ -127,8 +127,8 @@ run_all_tests:
     sub rsp, 24
     
     ; Initialize counters
-    mov dword [tests_passed], 0
-    mov dword [tests_failed], 0
+    mov dword [rel tests_passed], 0
+    mov dword [rel tests_failed], 0
     
     ; Print banner
     lea rdi, [rel msg_test_banner]
@@ -153,20 +153,20 @@ run_all_tests:
     lea rdi, [rel msg_summary]
     call print_str
     
-    mov edi, [tests_passed]
+    mov edi, [rel tests_passed]
     call print_int_val
     
     lea rdi, [rel msg_passed]
     call print_str
     
-    mov edi, [tests_failed]
+    mov edi, [rel tests_failed]
     call print_int_val
     
     lea rdi, [rel msg_failed]
     call print_str
     
     ; Return 0 if all passed, 1 if any failed
-    mov eax, [tests_failed]
+    mov eax, [rel tests_failed]
     test eax, eax
     jz .all_passed
     mov eax, 1
@@ -201,14 +201,14 @@ test_tensor_ops:
     
     ; Test 1: Tensor creation
     lea rdi, [rel test_tensor_create]
-    mov [current_test], rdi
+    mov [rel current_test], rdi
     call print_test_running
     
     ; Create a 2x4 tensor
-    mov qword [rsp], 2
+    mov qword [rel rsp], 2
     mov qword [rsp+8], 4
     mov rdi, 2
-    lea rsi, [rsp]
+    lea rsi, [rel rsp]
     xor edx, edx                ; float32
     call tensor_create
     mov r12, rax
@@ -230,7 +230,7 @@ test_tensor_ops:
 .test_fill:
     ; Test 2: Tensor fill
     lea rdi, [rel test_tensor_fill]
-    mov [current_test], rdi
+    mov [rel current_test], rdi
     call print_test_running
     
     test r12, r12
@@ -242,8 +242,8 @@ test_tensor_ops:
     call tensor_fill
     
     ; Verify first element is 2.0
-    mov rax, [r12]              ; TENSOR_DATA
-    mov eax, [rax]
+    mov rax, [rel r12]              ; TENSOR_DATA
+    mov eax, [rel rax]
     cmp eax, 0x40000000
     jne .tensor_fill_fail
     
@@ -260,7 +260,7 @@ test_tensor_ops:
 .test_size:
     ; Test 3: Tensor size
     lea rdi, [rel test_tensor_shape]
-    mov [current_test], rdi
+    mov [rel current_test], rdi
     call print_test_running
     
     test r12, r12
@@ -305,23 +305,23 @@ test_math_kernels:
     sub rsp, 56
     
     ; Create three tensors for testing
-    mov qword [rsp], 8          ; 8 elements
+    mov qword [rel rsp], 8          ; 8 elements
     mov rdi, 1
-    lea rsi, [rsp]
+    lea rsi, [rel rsp]
     xor edx, edx
     call tensor_create
     mov r12, rax                ; tensor a
     
-    mov qword [rsp], 8
+    mov qword [rel rsp], 8
     mov rdi, 1
-    lea rsi, [rsp]
+    lea rsi, [rel rsp]
     xor edx, edx
     call tensor_create
     mov r13, rax                ; tensor b
     
-    mov qword [rsp], 8
+    mov qword [rel rsp], 8
     mov rdi, 1
-    lea rsi, [rsp]
+    lea rsi, [rel rsp]
     xor edx, edx
     call tensor_create
     mov r14, rax                ; tensor out
@@ -347,7 +347,7 @@ test_math_kernels:
     
     ; Test ew_add: 3 + 2 = 5
     lea rdi, [rel test_ew_add]
-    mov [current_test], rdi
+    mov [rel current_test], rdi
     call print_test_running
     
     mov rdi, r14
@@ -355,8 +355,8 @@ test_math_kernels:
     mov rdx, r13
     call ew_add
     
-    mov rax, [r14]
-    mov eax, [rax]
+    mov rax, [rel r14]
+    mov eax, [rel rax]
     cmp eax, 0x40A00000         ; 5.0f
     jne .ew_add_fail
     call test_pass
@@ -367,7 +367,7 @@ test_math_kernels:
 .test_ew_sub:
     ; Test ew_sub: 3 - 2 = 1
     lea rdi, [rel test_ew_sub]
-    mov [current_test], rdi
+    mov [rel current_test], rdi
     call print_test_running
     
     mov rdi, r14
@@ -375,8 +375,8 @@ test_math_kernels:
     mov rdx, r13
     call ew_sub
     
-    mov rax, [r14]
-    mov eax, [rax]
+    mov rax, [rel r14]
+    mov eax, [rel rax]
     cmp eax, 0x3F800000         ; 1.0f
     jne .ew_sub_fail
     call test_pass
@@ -387,7 +387,7 @@ test_math_kernels:
 .test_ew_mul:
     ; Test ew_mul: 3 * 2 = 6
     lea rdi, [rel test_ew_mul]
-    mov [current_test], rdi
+    mov [rel current_test], rdi
     call print_test_running
     
     mov rdi, r14
@@ -395,8 +395,8 @@ test_math_kernels:
     mov rdx, r13
     call ew_mul
     
-    mov rax, [r14]
-    mov eax, [rax]
+    mov rax, [rel r14]
+    mov eax, [rel rax]
     cmp eax, 0x40C00000         ; 6.0f
     jne .ew_mul_fail
     call test_pass
@@ -444,7 +444,7 @@ test_layers:
     
     ; Test Linear layer
     lea rdi, [rel test_linear_layer]
-    mov [current_test], rdi
+    mov [rel current_test], rdi
     call print_test_running
     
     mov rdi, 4                  ; in_features
@@ -457,7 +457,7 @@ test_layers:
     jz .linear_fail
     
     ; Verify n_params = 2 (weight + bias)
-    mov eax, [r12]
+    mov eax, [rel r12]
     cmp eax, 2
     jne .linear_fail
     
@@ -470,13 +470,13 @@ test_layers:
 .test_relu:
     ; Test ReLU
     lea rdi, [rel test_relu_forward]
-    mov [current_test], rdi
+    mov [rel current_test], rdi
     call print_test_running
     
     ; Create input tensor with negative and positive values
-    mov qword [rsp], 4
+    mov qword [rel rsp], 4
     mov rdi, 1
-    lea rsi, [rsp]
+    lea rsi, [rel rsp]
     xor edx, edx
     call tensor_create
     mov r13, rax
@@ -485,8 +485,8 @@ test_layers:
     jz .relu_fail
     
     ; Set values: -1, 0, 1, 2
-    mov rax, [r13]
-    mov dword [rax], 0xBF800000     ; -1.0f
+    mov rax, [rel r13]
+    mov dword [rel rax], 0xBF800000     ; -1.0f
     mov dword [rax+4], 0x00000000   ; 0.0f
     mov dword [rax+8], 0x3F800000   ; 1.0f
     mov dword [rax+12], 0x40000000  ; 2.0f
@@ -507,11 +507,11 @@ test_layers:
     jz .relu_fail
     
     ; Check output: 0, 0, 1, 2
-    mov rax, [rax]              ; output node value tensor
-    mov rax, [rax]              ; tensor data
+    mov rax, [rel rax]              ; output node value tensor
+    mov rax, [rel rax]              ; tensor data
     
     ; First element should be 0 (max(-1, 0) = 0)
-    mov eax, [rax]
+    mov eax, [rel rax]
     cmp eax, 0x00000000
     jne .relu_fail
     
@@ -541,13 +541,13 @@ test_autograd:
     sub rsp, 24
     
     lea rdi, [rel test_node_create]
-    mov [current_test], rdi
+    mov [rel current_test], rdi
     call print_test_running
     
     ; Create a tensor
-    mov qword [rsp], 4
+    mov qword [rel rsp], 4
     mov rdi, 1
-    lea rsi, [rsp]
+    lea rsi, [rel rsp]
     xor edx, edx
     call tensor_create
     mov r12, rax
@@ -603,13 +603,13 @@ run_gradient_checks:
     ; At x=3: analytical=6, numerical should be ~6
     
     lea rdi, [rel test_grad_linear]
-    mov [current_test], rdi
+    mov [rel current_test], rdi
     call print_test_running
     
     ; Create input tensor
-    mov qword [rsp], 1
+    mov qword [rel rsp], 1
     mov rdi, 1
-    lea rsi, [rsp]
+    lea rsi, [rel rsp]
     xor edx, edx
     call tensor_create
     mov r12, rax                ; x tensor
@@ -618,8 +618,8 @@ run_gradient_checks:
     jz .grad_check_fail
     
     ; Set x = 3.0
-    mov rax, [r12]
-    mov dword [rax], 0x40400000 ; 3.0f
+    mov rax, [rel r12]
+    mov dword [rel rax], 0x40400000 ; 3.0f
     
     ; Compute numerical gradient using central differences
     ; grad ≈ (f(x+eps) - f(x-eps)) / (2*eps)
@@ -679,12 +679,12 @@ numerical_gradient:
     mov r15d, ecx               ; index
     
     ; Get pointer to element
-    mov rax, [r12]              ; data pointer
+    mov rax, [rel r12]              ; data pointer
     lea rbx, [rax + r15*4]      ; pointer to element (float32)
     
     ; Save original value
-    movss xmm0, [rbx]
-    movss [rsp], xmm0
+    movss xmm0, [rel rbx]
+    movss [rel rsp], xmm0
     
     ; eps = 1e-5
     movsd xmm1, [rel epsilon]
@@ -692,9 +692,9 @@ numerical_gradient:
     movss [rsp+4], xmm1         ; save eps
     
     ; Compute f(x + eps)
-    movss xmm0, [rsp]
+    movss xmm0, [rel rsp]
     addss xmm0, xmm1
-    movss [rbx], xmm0           ; param[i] = x + eps
+    movss [rel rbx], xmm0           ; param[rel i] = x + eps
     
     mov rdi, r14                ; context
     mov rsi, r12                ; param
@@ -702,10 +702,10 @@ numerical_gradient:
     movss [rsp+8], xmm0         ; f_plus
     
     ; Compute f(x - eps)
-    movss xmm0, [rsp]           ; original x
+    movss xmm0, [rel rsp]           ; original x
     movss xmm1, [rsp+4]         ; eps
     subss xmm0, xmm1
-    movss [rbx], xmm0           ; param[i] = x - eps
+    movss [rel rbx], xmm0           ; param[rel i] = x - eps
     
     mov rdi, r14
     mov rsi, r12
@@ -713,8 +713,8 @@ numerical_gradient:
     movss [rsp+12], xmm0        ; f_minus
     
     ; Restore original value
-    movss xmm0, [rsp]
-    movss [rbx], xmm0
+    movss xmm0, [rel rsp]
+    movss [rel rbx], xmm0
     
     ; grad = (f_plus - f_minus) / (2 * eps)
     movss xmm0, [rsp+8]         ; f_plus
@@ -769,7 +769,7 @@ print_test_running:
     
     lea rdi, [rel msg_running]
     call print_str
-    mov rdi, [current_test]
+    mov rdi, [rel current_test]
     call print_str
     
     pop rbp
@@ -785,12 +785,12 @@ test_pass:
     
     lea rdi, [rel msg_pass]
     call print_str
-    mov rdi, [current_test]
+    mov rdi, [rel current_test]
     call print_str
     lea rdi, [rel msg_newline]
     call print_str
     
-    inc dword [tests_passed]
+    inc dword [rel tests_passed]
     
     pop rbp
     ret
@@ -804,12 +804,12 @@ test_fail:
     
     lea rdi, [rel msg_fail]
     call print_str
-    mov rdi, [current_test]
+    mov rdi, [rel current_test]
     call print_str
     lea rdi, [rel msg_newline]
     call print_str
     
-    inc dword [tests_failed]
+    inc dword [rel tests_failed]
     
     pop rbp
     ret

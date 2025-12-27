@@ -114,7 +114,7 @@ sgd_create:
     mov r12, rdi                    ; params
     mov r13, rsi                    ; param_nodes
     mov r14d, edx                   ; n_params
-    movsd [rsp], xmm0               ; lr
+    movsd [rel rsp], xmm0               ; lr
     movsd [rsp+8], xmm1             ; momentum
     
     ; Allocate optimizer struct
@@ -142,8 +142,8 @@ sgd_create:
     mov rbx, rax
     
     ; Copy hyperparameters
-    movsd xmm0, [rsp]
-    movsd [rbx], xmm0               ; lr
+    movsd xmm0, [rel rsp]
+    movsd [rel rbx], xmm0               ; lr
     movsd xmm0, [rsp+8]
     movsd [rbx+8], xmm0             ; momentum
     
@@ -167,7 +167,7 @@ sgd_create:
     jge .done                       ; done creating velocities, jump to .done
     
     push rcx
-    mov rax, [r12 + rcx*8]          ; params[i]
+    mov rax, [r12 + rcx*8]          ; params[rel i]
     mov rdi, [rax + TENSOR_NDIM]
     mov rsi, [rax + TENSOR_SHAPE]
     mov edx, [rax + TENSOR_DTYPE]
@@ -226,10 +226,10 @@ sgd_step:
     mov r15, [r12 + OPT_PARAM_NODES] ; param_nodes array
     mov rbx, [r12 + OPT_STATE]
     
-    movsd xmm4, [rbx]               ; lr
+    movsd xmm4, [rel rbx]               ; lr
     movsd xmm5, [rbx+8]             ; momentum
     mov rax, [rbx+16]               ; velocities (may be null)
-    mov [rsp], rax
+    mov [rel rsp], rax
     
     ; Check if using momentum
     vxorpd xmm0, xmm0, xmm0
@@ -245,7 +245,7 @@ sgd_step:
     mov [rsp+8], ecx                ; save index
     
     mov rax, [r14 + rcx*8]          ; param tensor
-    ; Get grad from param_nodes[i]->grad (NODE_GRAD = 8)
+    ; Get grad from param_nodes[rel i]->grad (NODE_GRAD = 8)
     mov rsi, [r15 + rcx*8]          ; param_node
     test rsi, rsi
     jz .next_param                  ; skip if null node
@@ -253,7 +253,7 @@ sgd_step:
     test rsi, rsi
     jz .next_param                  ; skip if null grad
     mov [rsp+48], rsi               ; save grad tensor
-    mov r8, [rsp]
+    mov r8, [rel rsp]
     mov rdx, [r8 + rcx*8]           ; velocity tensor
     
     mov rdi, [rax + TENSOR_DATA]
@@ -321,7 +321,7 @@ sgd_step:
 
 .next_param_restore:
     ; Restore lr and momentum to double
-    movsd xmm4, [rbx]
+    movsd xmm4, [rel rbx]
     movsd xmm5, [rbx+8]
 
 .next_param:
@@ -339,7 +339,7 @@ sgd_step:
     mov [rsp+8], ecx
     
     mov rax, [r14 + rcx*8]          ; param tensor
-    ; Get grad from param_nodes[i]->grad
+    ; Get grad from param_nodes[rel i]->grad
     mov rsi, [r15 + rcx*8]          ; param_node
     test rsi, rsi
     jz .simple_next                 ; skip if null node
@@ -397,7 +397,7 @@ sgd_step:
     jmp .simple_f32_loop
 
 .simple_next_restore:
-    movsd xmm4, [rbx]
+    movsd xmm4, [rel rbx]
 
 .simple_next:
     mov ecx, [rsp+8]
@@ -491,7 +491,7 @@ adam_create:
     mov r12, rdi                    ; params
     mov r13, rsi                    ; param_nodes
     mov r14d, edx                   ; n_params
-    movsd [rsp], xmm0               ; lr
+    movsd [rel rsp], xmm0               ; lr
     movsd [rsp+8], xmm1             ; beta1
     movsd [rsp+16], xmm2            ; beta2
     movsd [rsp+24], xmm3            ; eps
@@ -521,8 +521,8 @@ adam_create:
     mov rbx, rax
     
     ; Copy hyperparameters
-    movsd xmm0, [rsp]
-    movsd [rbx], xmm0               ; lr
+    movsd xmm0, [rel rsp]
+    movsd [rel rbx], xmm0               ; lr
     movsd xmm0, [rsp+8]
     movsd [rbx+8], xmm0             ; beta1
     movsd xmm0, [rsp+16]
@@ -558,7 +558,7 @@ adam_create:
     mov rsi, [rax + TENSOR_SHAPE]
     mov edx, [rax + TENSOR_DTYPE]
     call tensor_zeros
-    mov rcx, [rsp]
+    mov rcx, [rel rsp]
     mov r8, [rsp+40]                ; m array (adjusted for push)
     mov [r8 + rcx*8], rax
     
@@ -623,12 +623,12 @@ adam_step:
     inc qword [rbx+32]
     
     ; Load hyperparameters
-    movsd xmm4, [rbx]               ; lr
+    movsd xmm4, [rel rbx]               ; lr
     movsd xmm5, [rbx+8]             ; beta1
     movsd xmm6, [rbx+16]            ; beta2
     movsd xmm7, [rbx+24]            ; eps
     mov rax, [rbx+32]               ; t
-    mov [rsp], rax
+    mov [rel rsp], rax
     mov rax, [rbx+40]               ; m array
     mov [rsp+8], rax
     mov rax, [rbx+48]               ; v array
@@ -643,7 +643,7 @@ adam_step:
     ; Compute bias corrections: 1 - beta^t
     ; bias1 = 1 - beta1^t
     movsd xmm0, xmm5                ; beta1
-    cvtsi2sd xmm1, qword [rsp]      ; t
+    cvtsi2sd xmm1, qword [rel rsp]      ; t
     sub rsp, 8
     call pow wrt ..plt
     add rsp, 8
@@ -653,7 +653,7 @@ adam_step:
     
     ; bias2 = 1 - beta2^t
     movsd xmm0, [rsp+40]            ; beta2
-    cvtsi2sd xmm1, qword [rsp]      ; t
+    cvtsi2sd xmm1, qword [rel rsp]      ; t
     sub rsp, 8
     call pow wrt ..plt
     add rsp, 8
@@ -671,7 +671,7 @@ adam_step:
     
     mov rax, [r14 + rcx*8]          ; param tensor
     mov [rsp+80], rax
-    ; Get grad from param_nodes[i]->grad
+    ; Get grad from param_nodes[rel i]->grad
     mov rsi, [r15 + rcx*8]          ; param_node
     test rsi, rsi
     jz .adam_next                   ; skip if null node
@@ -899,7 +899,7 @@ optimizer_set_lr:
     test rbx, rbx
     jz .done
     
-    movsd [rbx], xmm0          ; both SGD/Adam have lr at offset 0
+    movsd [rel rbx], xmm0          ; both SGD/Adam have lr at offset 0
 
 .done:
     pop rbx
@@ -924,7 +924,7 @@ optimizer_get_lr:
     mov rbx, [rdi + OPT_STATE]
     test rbx, rbx
     jz .out
-    movsd xmm0, [rbx]
+    movsd xmm0, [rel rbx]
 
 .out:
     pop rbx
@@ -972,7 +972,7 @@ optimizer_save_state:
     ; Write n_params (4 bytes)
     lea rdi, [rbp - 48]
     mov eax, [r12 + OPT_N_PARAMS]
-    mov [rdi], eax
+    mov [rel rdi], eax
     mov r15d, eax               ; save n_params
     
     ; Determine optimizer type by comparing step_fn pointer
@@ -1040,7 +1040,7 @@ optimizer_save_state:
     call tensor_data_size
     mov rdx, rax                ; bytes
     pop rax
-    mov rsi, [rax]              ; TENSOR_DATA
+    mov rsi, [rel rax]              ; TENSOR_DATA
     mov rax, 1
     mov rdi, r14
     syscall
@@ -1088,7 +1088,7 @@ optimizer_save_state:
     call tensor_data_size
     mov rdx, rax
     pop rax
-    mov rsi, [rax]
+    mov rsi, [rel rax]
     mov rax, 1
     mov rdi, r14
     syscall
@@ -1119,7 +1119,7 @@ optimizer_save_state:
     call tensor_data_size
     mov rdx, rax
     pop rax
-    mov rsi, [rax]
+    mov rsi, [rel rax]
     mov rax, 1
     mov rdi, r14
     syscall
@@ -1247,7 +1247,7 @@ optimizer_load_state:
     call tensor_data_size
     mov rdx, rax
     pop rax
-    mov rsi, [rax]
+    mov rsi, [rel rax]
     mov rax, 0
     mov rdi, r14
     syscall
@@ -1288,7 +1288,7 @@ optimizer_load_state:
     call tensor_data_size
     mov rdx, rax
     pop rax
-    mov rsi, [rax]
+    mov rsi, [rel rax]
     mov rax, 0
     mov rdi, r14
     syscall
@@ -1314,7 +1314,7 @@ optimizer_load_state:
     call tensor_data_size
     mov rdx, rax
     pop rax
-    mov rsi, [rax]
+    mov rsi, [rel rax]
     mov rax, 0
     mov rdi, r14
     syscall
