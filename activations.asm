@@ -2300,5 +2300,348 @@ elu_backward:
     pop rbp
     ret
 
+; =============================================================================
+; SELU (Scaled Exponential Linear Unit)
+; SELU(x) = λ * (x if x > 0 else α * (exp(x) - 1))
+; λ ≈ 1.0507, α ≈ 1.6733
+; =============================================================================
+
+; =============================================================================
+; selu_forward - SELU forward pass (tensor-only, no autograd)
+; Arguments:
+;   RDI = Tensor* out
+;   RSI = Tensor* x
+; =============================================================================
+selu_forward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 8
+    
+    mov r12, rdi                    ; out
+    mov r13, rsi                    ; x
+    
+    mov rdi, r13
+    call tensor_numel
+    mov r14, rax
+    
+    mov rdi, [r12 + TENSOR_DATA]
+    mov rsi, [r13 + TENSOR_DATA]
+    
+    mov eax, [r12 + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .selu_fwd_f32
+    
+    ; float64
+    movsd xmm4, [rel selu_lambda_f64]
+    movsd xmm5, [rel selu_alpha_f64]
+    xor rcx, rcx
+.selu_fwd_f64_loop:
+    cmp rcx, r14
+    jge .selu_fwd_done
+    movsd xmm0, [rsi + rcx*8]       ; x
+    
+    xorpd xmm2, xmm2
+    comisd xmm0, xmm2
+    jae .selu_fwd_f64_pos
+    
+    ; x < 0: λ * α * (exp(x) - 1)
+    sub rsp, 32
+    mov [rsp], rcx
+    movsd [rsp+8], xmm4
+    movsd [rsp+16], xmm5
+    call exp wrt ..plt
+    mov rcx, [rsp]
+    movsd xmm4, [rsp+8]
+    movsd xmm5, [rsp+16]
+    add rsp, 32
+    
+    movsd xmm2, [rel one_f64]
+    subsd xmm0, xmm2                ; exp(x) - 1
+    mulsd xmm0, xmm5                ; α * (exp(x) - 1)
+    mulsd xmm0, xmm4                ; λ * α * (exp(x) - 1)
+    jmp .selu_fwd_f64_store
+
+.selu_fwd_f64_pos:
+    ; x >= 0: λ * x
+    mulsd xmm0, xmm4
+.selu_fwd_f64_store:
+    movsd [rdi + rcx*8], xmm0
+    inc rcx
+    jmp .selu_fwd_f64_loop
+
+.selu_fwd_f32:
+    movsd xmm4, [rel selu_lambda_f64]
+    movsd xmm5, [rel selu_alpha_f64]
+    xor rcx, rcx
+.selu_fwd_f32_loop:
+    cmp rcx, r14
+    jge .selu_fwd_done
+    movss xmm0, [rsi + rcx*4]
+    cvtss2sd xmm0, xmm0
+    
+    xorpd xmm2, xmm2
+    comisd xmm0, xmm2
+    jae .selu_fwd_f32_pos
+    
+    ; x < 0
+    sub rsp, 32
+    mov [rsp], rcx
+    movsd [rsp+8], xmm4
+    movsd [rsp+16], xmm5
+    call exp wrt ..plt
+    mov rcx, [rsp]
+    movsd xmm4, [rsp+8]
+    movsd xmm5, [rsp+16]
+    add rsp, 32
+    
+    movsd xmm2, [rel one_f64]
+    subsd xmm0, xmm2
+    mulsd xmm0, xmm5
+    mulsd xmm0, xmm4
+    cvtsd2ss xmm0, xmm0
+    jmp .selu_fwd_f32_store
+
+.selu_fwd_f32_pos:
+    mulsd xmm0, xmm4
+    cvtsd2ss xmm0, xmm0
+.selu_fwd_f32_store:
+    movss [rdi + rcx*4], xmm0
+    inc rcx
+    jmp .selu_fwd_f32_loop
+
+.selu_fwd_done:
+    add rsp, 8
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; node_selu - SELU activation with autograd
+; Arguments:
+;   RDI = Node* x
+; Returns:
+;   RAX = Node* out
+; =============================================================================
+node_selu:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 24
+    
+    mov r12, rdi                    ; input node
+    
+    ; Create output tensor
+    mov rax, [r12 + NODE_VALUE]
+    mov rdi, [rax + TENSOR_NDIM]
+    mov rsi, [rax + TENSOR_SHAPE]
+    mov edx, [rax + TENSOR_DTYPE]
+    call tensor_create
+    test rax, rax
+    jz .selu_node_alloc_failed
+    mov r13, rax                    ; output tensor
+    
+    ; Compute SELU
+    mov rdi, r13
+    mov rsi, [r12 + NODE_VALUE]
+    call selu_forward
+    
+    ; Create node
+    mov rdi, r13
+    mov rsi, 1
+    call node_create
+    test rax, rax
+    jz .selu_node_alloc_failed
+    mov rbx, rax
+    
+    ; Set backward function
+    lea rax, [rel selu_backward]
+    mov [rbx + NODE_BACKWARD_FN], rax
+    
+    ; Set parent
+    mov dword [rbx + NODE_N_PARENTS], 1
+    mov rdi, 8
+    call mem_alloc
+    mov [rbx + NODE_PARENTS], rax
+    mov [rel rax], r12
+    
+    mov rax, rbx
+    
+    add rsp, 24
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.selu_node_alloc_failed:
+    xor eax, eax
+    add rsp, 24
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; selu_backward - Backward for SELU
+; dL/dx = dL/dout * λ * (1 if x >= 0 else α * exp(x))
+; =============================================================================
+selu_backward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 24
+    
+    mov r12, rdi                    ; self
+    mov r13, [r12 + NODE_GRAD]      ; dL/dout
+    mov r14, [r12 + NODE_PARENTS]
+    mov r15, [rel r14]              ; parent x
+    
+    mov rax, [r15 + NODE_GRAD]
+    test rax, rax
+    jz .selu_bwd_done
+    
+    mov rbx, rax                    ; parent grad tensor
+    
+    mov rdi, [rbx + TENSOR_DATA]    ; grad_x
+    mov rsi, [r13 + TENSOR_DATA]    ; dL/dout
+    mov rdx, [r15 + NODE_VALUE]
+    mov rdx, [rdx + TENSOR_DATA]    ; x
+    
+    mov [rsp], rdi
+    mov [rsp+8], rsi
+    mov [rsp+16], rdx
+    
+    push rbx
+    mov rdi, rbx
+    call tensor_numel
+    mov rcx, rax
+    pop rbx
+    
+    mov rdi, [rsp]
+    mov rsi, [rsp+8]
+    mov rdx, [rsp+16]
+    
+    mov eax, [rbx + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .selu_bwd_f32
+    
+    ; float64
+    movsd xmm4, [rel selu_lambda_f64]
+    movsd xmm5, [rel selu_alpha_f64]
+    xor r8, r8
+.selu_bwd_f64_loop:
+    cmp r8, rcx
+    jge .selu_bwd_done
+    
+    movsd xmm0, [rdx + r8*8]        ; x
+    movsd xmm2, [rsi + r8*8]        ; dL/dout
+    
+    xorpd xmm3, xmm3
+    comisd xmm0, xmm3
+    jae .selu_bwd_f64_pos
+    
+    ; x < 0: grad = dL/dout * λ * α * exp(x)
+    sub rsp, 48
+    mov [rsp], r8
+    mov [rsp+8], rcx
+    movsd [rsp+16], xmm2
+    movsd [rsp+24], xmm4
+    movsd [rsp+32], xmm5
+    call exp wrt ..plt
+    mov r8, [rsp]
+    mov rcx, [rsp+8]
+    movsd xmm2, [rsp+16]
+    movsd xmm4, [rsp+24]
+    movsd xmm5, [rsp+32]
+    add rsp, 48
+    
+    mulsd xmm0, xmm5                ; α * exp(x)
+    mulsd xmm0, xmm4                ; λ * α * exp(x)
+    mulsd xmm2, xmm0
+    jmp .selu_bwd_f64_acc
+
+.selu_bwd_f64_pos:
+    ; x >= 0: grad = dL/dout * λ
+    mulsd xmm2, xmm4
+.selu_bwd_f64_acc:
+    addsd xmm2, [rdi + r8*8]
+    movsd [rdi + r8*8], xmm2
+    
+    inc r8
+    jmp .selu_bwd_f64_loop
+
+.selu_bwd_f32:
+    movsd xmm4, [rel selu_lambda_f64]
+    movsd xmm5, [rel selu_alpha_f64]
+    xor r8, r8
+.selu_bwd_f32_loop:
+    cmp r8, rcx
+    jge .selu_bwd_done
+    
+    movss xmm0, [rdx + r8*4]
+    cvtss2sd xmm0, xmm0
+    movss xmm2, [rsi + r8*4]
+    cvtss2sd xmm2, xmm2
+    
+    xorpd xmm3, xmm3
+    comisd xmm0, xmm3
+    jae .selu_bwd_f32_pos
+    
+    sub rsp, 48
+    mov [rsp], r8
+    mov [rsp+8], rcx
+    movsd [rsp+16], xmm2
+    movsd [rsp+24], xmm4
+    movsd [rsp+32], xmm5
+    call exp wrt ..plt
+    mov r8, [rsp]
+    mov rcx, [rsp+8]
+    movsd xmm2, [rsp+16]
+    movsd xmm4, [rsp+24]
+    movsd xmm5, [rsp+32]
+    add rsp, 48
+    
+    mulsd xmm0, xmm5
+    mulsd xmm0, xmm4
+    mulsd xmm2, xmm0
+    jmp .selu_bwd_f32_acc
+
+.selu_bwd_f32_pos:
+    mulsd xmm2, xmm4
+.selu_bwd_f32_acc:
+    cvtsd2ss xmm2, xmm2
+    addss xmm2, [rdi + r8*4]
+    movss [rdi + r8*4], xmm2
+    
+    inc r8
+    jmp .selu_bwd_f32_loop
+
+.selu_bwd_done:
+    add rsp, 24
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
 ; Mark stack as non-executable
 section .note.GNU-stack noalloc noexec nowrite progbits

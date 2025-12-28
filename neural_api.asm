@@ -1250,6 +1250,36 @@ neural_elu:
     ret
 
 ; =============================================================================
+; neural_selu - SELU activation
+; Arguments:
+;   RDI = NeuralTensor* out
+;   RSI = const NeuralTensor* x
+; Returns: int (error code)
+; =============================================================================
+neural_selu:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .selu_api_null
+    test rsi, rsi
+    jz .selu_api_null
+    
+    call selu_forward
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .selu_api_done
+
+.selu_api_null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.selu_api_done:
+    pop rbp
+    ret
+
+; =============================================================================
 ; neural_linear_create - Create linear layer
 ; Arguments:
 ;   RDI = uint64_t in_features

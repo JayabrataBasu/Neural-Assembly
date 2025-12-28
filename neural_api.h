@@ -429,6 +429,16 @@ int neural_leaky_relu(NeuralTensor* out, const NeuralTensor* input, double alpha
  */
 int neural_elu(NeuralTensor* out, const NeuralTensor* input, double alpha);
 
+/**
+ * @brief SELU activation (Scaled Exponential Linear Unit)
+ * SELU(x) = λ * (x if x > 0, else α * (exp(x) - 1))
+ * With λ ≈ 1.0507, α ≈ 1.6733 for self-normalizing properties
+ * @param out Output tensor
+ * @param input Input tensor
+ * @return NEURAL_OK on success, error code on failure
+ */
+int neural_selu(NeuralTensor* out, const NeuralTensor* input);
+
 /* ============================================================================ */
 /* Neural Network Layers */
 /* ============================================================================ */
