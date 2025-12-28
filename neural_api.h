@@ -594,6 +594,26 @@ int neural_optimizer_step(NeuralOptimizer* optimizer, NeuralTensor** params, Neu
  */
 int neural_optimizer_zero_grad(NeuralTensor** grads, uint64_t num_params);
 
+/**
+ * @brief Clip gradients by global L2 norm.
+ * If the L2 norm of all gradients exceeds max_norm, scale all gradients
+ * by (max_norm / current_norm).
+ * @param optimizer Optimizer containing parameters with gradients
+ * @param max_norm Maximum allowed L2 norm of gradients
+ * @return NEURAL_OK on success, error code on failure
+ */
+int neural_clip_grad_norm(NeuralOptimizer* optimizer, double max_norm);
+
+/**
+ * @brief Clip gradient values to a specified range.
+ * Clips each gradient element to the range [min_val, max_val].
+ * @param optimizer Optimizer containing parameters with gradients
+ * @param min_val Minimum allowed gradient value
+ * @param max_val Maximum allowed gradient value
+ * @return NEURAL_OK on success, error code on failure
+ */
+int neural_clip_grad_value(NeuralOptimizer* optimizer, double min_val, double max_val);
+
 /* ============================================================================ */
 /* Autograd */
 /* ============================================================================ */

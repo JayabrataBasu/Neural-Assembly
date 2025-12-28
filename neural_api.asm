@@ -98,6 +98,8 @@ extern sgd_create
 extern adam_create
 extern optimizer_step
 extern optimizer_free
+extern clip_grad_norm_
+extern clip_grad_value_
 
 extern node_create
 extern node_free
@@ -171,6 +173,8 @@ global neural_mish
 global neural_hardswish
 global neural_softplus
 global neural_hardtanh
+global neural_clip_grad_norm
+global neural_clip_grad_value
 global neural_linear_create
 global neural_linear_free
 global neural_linear_forward
@@ -1426,6 +1430,61 @@ neural_hardtanh:
     mov [rel last_error], eax
 
 .hardtanh_api_done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_clip_grad_norm - Clip gradients by global L2 norm
+; Arguments:
+;   RDI = NeuralOptimizer* opt
+;   XMM0 = max_norm (double)
+; Returns: int (error code)
+; =============================================================================
+neural_clip_grad_norm:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .clip_norm_null
+    
+    call clip_grad_norm_
+    
+    mov dword [rel last_error], NEURAL_OK
+    jmp .clip_norm_done
+
+.clip_norm_null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.clip_norm_done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_clip_grad_value - Clip gradient values to range [min_val, max_val]
+; Arguments:
+;   RDI = NeuralOptimizer* opt
+;   XMM0 = min_val (double)
+;   XMM1 = max_val (double)
+; Returns: int (error code)
+; =============================================================================
+neural_clip_grad_value:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .clip_value_null
+    
+    call clip_grad_value_
+    
+    mov dword [rel last_error], NEURAL_OK
+    jmp .clip_value_done
+
+.clip_value_null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.clip_value_done:
     pop rbp
     ret
 

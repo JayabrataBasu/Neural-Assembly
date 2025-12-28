@@ -89,6 +89,8 @@ global optimizer_set_lr
 global optimizer_get_lr
 global optimizer_save_state
 global optimizer_load_state
+global clip_grad_norm_
+global clip_grad_value_
 
 ; =============================================================================
 ; sgd_create - Create SGD optimizer
@@ -1346,5 +1348,260 @@ optimizer_load_state:
     pop rbx
     pop rbp
     ret
+
+; =============================================================================
+; GRADIENT CLIPPING FUNCTIONS
+; =============================================================================
+
+; =============================================================================
+; clip_grad_norm_ - Clip gradients by global L2 norm
+; Arguments:
+;   RDI = Optimizer* opt
+;   XMM0 = max_norm (double)
+; Returns:
+;   RAX = 0 on success, error code on failure
+; =============================================================================
+clip_grad_norm_:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 64
+    
+    mov r12, rdi                    ; optimizer
+    movsd [rsp+56], xmm0            ; max_norm
+    
+    mov r13d, [r12 + OPT_N_PARAMS]
+    mov r14, [r12 + OPT_PARAM_NODES]
+    
+    ; First pass: compute total L2 norm of all gradients
+    vxorpd xmm4, xmm4, xmm4         ; total_norm = 0.0
+    
+    xor ecx, ecx
+.norm_compute_loop:
+    cmp ecx, r13d
+    jge .norm_compute_done
+    
+    mov rsi, [r14 + rcx*8]          ; param_node
+    test rsi, rsi
+    jz .norm_next_param
+    mov rsi, [rsi + NODE_GRAD]      ; grad tensor
+    test rsi, rsi
+    jz .norm_next_param
+    
+    ; Compute L2 norm of this gradient
+    mov rdi, rsi
+    call tensor_numel
+    mov r15, rax
+    
+    mov rsi, [rsi + TENSOR_DATA]
+    mov eax, [rdi + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .norm_f32_compute
+    
+    ; float64
+    xor rbx, rbx
+.norm_f64_compute_loop:
+    cmp rbx, r15
+    jge .norm_next_param
+    movsd xmm0, [rsi + rbx*8]
+    mulsd xmm0, xmm0
+    addsd xmm4, xmm0
+    inc rbx
+    jmp .norm_f64_compute_loop
+
+.norm_f32_compute:
+    xor rbx, rbx
+.norm_f32_compute_loop:
+    cmp rbx, r15
+    jge .norm_next_param
+    movss xmm0, [rsi + rbx*4]
+    cvtss2sd xmm0, xmm0
+    mulsd xmm0, xmm0
+    addsd xmm4, xmm0
+    inc rbx
+    jmp .norm_f32_compute_loop
+
+.norm_next_param:
+    inc ecx
+    jmp .norm_compute_loop
+
+.norm_compute_done:
+    ; total_norm = sqrt(total_norm)
+    sqrtsd xmm4, xmm4
+    
+    ; Check if clipping needed
+    movsd xmm0, [rsp+56]            ; max_norm
+    ucomisd xmm4, xmm0
+    jbe .no_clipping_needed         ; total_norm <= max_norm
+    
+    ; Compute scale factor: max_norm / total_norm
+    divsd xmm0, xmm4                ; scale = max_norm / total_norm
+    movsd [rsp+48], xmm0            ; save scale
+    
+    ; Second pass: apply scaling to all gradients
+    xor ecx, ecx
+.norm_clip_loop:
+    cmp ecx, r13d
+    jge .norm_clip_done
+    
+    mov rsi, [r14 + rcx*8]          ; param_node
+    test rsi, rsi
+    jz .norm_clip_next
+    mov rsi, [rsi + NODE_GRAD]      ; grad tensor
+    test rsi, rsi
+    jz .norm_clip_next
+    
+    mov rdi, rsi
+    call tensor_numel
+    mov r15, rax
+    
+    mov rsi, [rsi + TENSOR_DATA]
+    mov eax, [rdi + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .norm_clip_f32
+    
+    ; float64
+    movsd xmm5, [rsp+48]            ; scale
+    xor rbx, rbx
+.norm_clip_f64_loop:
+    cmp rbx, r15
+    jge .norm_clip_next
+    movsd xmm0, [rsi + rbx*8]
+    mulsd xmm0, xmm5
+    movsd [rsi + rbx*8], xmm0
+    inc rbx
+    jmp .norm_clip_f64_loop
+
+.norm_clip_f32:
+    movsd xmm5, [rsp+48]
+    cvtsd2ss xmm5, xmm5
+    xor rbx, rbx
+.norm_clip_f32_loop:
+    cmp rbx, r15
+    jge .norm_clip_next
+    movss xmm0, [rsi + rbx*4]
+    mulss xmm0, xmm5
+    movss [rsi + rbx*4], xmm0
+    inc rbx
+    jmp .norm_clip_f32_loop
+
+.norm_clip_next:
+    inc ecx
+    jmp .norm_clip_loop
+
+.norm_clip_done:
+.no_clipping_needed:
+    xor eax, eax                    ; success
+    add rsp, 64
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; clip_grad_value_ - Clip gradient values to range [min_val, max_val]
+; Arguments:
+;   RDI = Optimizer* opt
+;   XMM0 = min_val (double)
+;   XMM1 = max_val (double)
+; Returns:
+;   RAX = 0 on success, error code on failure
+; =============================================================================
+clip_grad_value_:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 32
+    
+    mov r12, rdi                    ; optimizer
+    movsd [rsp+16], xmm0            ; min_val
+    movsd [rsp+24], xmm1            ; max_val
+    
+    mov r13d, [r12 + OPT_N_PARAMS]
+    mov r14, [r12 + OPT_PARAM_NODES]
+    
+    xor ecx, ecx
+.value_clip_loop:
+    cmp ecx, r13d
+    jge .value_clip_done
+    
+    mov rsi, [r14 + rcx*8]          ; param_node
+    test rsi, rsi
+    jz .value_clip_next
+    mov rsi, [rsi + NODE_GRAD]      ; grad tensor
+    test rsi, rsi
+    jz .value_clip_next
+    
+    mov rdi, rsi
+    call tensor_numel
+    mov r15, rax
+    
+    mov rsi, [rsi + TENSOR_DATA]
+    mov eax, [rdi + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .value_clip_f32
+    
+    ; float64
+    movsd xmm4, [rsp+16]            ; min_val
+    movsd xmm5, [rsp+24]            ; max_val
+    xor rbx, rbx
+.value_clip_f64_loop:
+    cmp rbx, r15
+    jge .value_clip_next
+    movsd xmm0, [rsi + rbx*8]
+    
+    ; Clip to min_val
+    maxsd xmm0, xmm4
+    ; Clip to max_val
+    minsd xmm0, xmm5
+    
+    movsd [rsi + rbx*8], xmm0
+    inc rbx
+    jmp .value_clip_f64_loop
+
+.value_clip_f32:
+    movsd xmm4, [rsp+16]
+    cvtsd2ss xmm4, xmm4
+    movsd xmm5, [rsp+24]
+    cvtsd2ss xmm5, xmm5
+    xor rbx, rbx
+.value_clip_f32_loop:
+    cmp rbx, r15
+    jge .value_clip_next
+    movss xmm0, [rsi + rbx*4]
+    
+    maxss xmm0, xmm4
+    minss xmm0, xmm5
+    
+    movss [rsi + rbx*4], xmm0
+    inc rbx
+    jmp .value_clip_f32_loop
+
+.value_clip_next:
+    inc ecx
+    jmp .value_clip_loop
+
+.value_clip_done:
+    xor eax, eax                    ; success
+    add rsp, 32
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
 ; Mark stack as non-executable
 section .note.GNU-stack noalloc noexec nowrite progbits
