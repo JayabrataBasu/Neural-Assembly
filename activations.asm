@@ -28,12 +28,21 @@ section .data
     zero_f64:           dq 0.0
     one_f64:            dq 1.0
     neg_one_f64:        dq -1.0
+    half_f64:           dq 0.5
+    two_f64:            dq 2.0
+    three_f64:          dq 3.0
+    six_f64:            dq 6.0
     ; GELU constants: sqrt(2/pi) ≈ 0.7978845608
     gelu_sqrt_2_pi:     dq 0.7978845608028654
     gelu_coeff:         dq 0.044715
     ; LeakyReLU default alpha
     leaky_alpha_f64:    dq 0.01
     leaky_alpha_f32:    dd 0.01
+    ; ELU default alpha
+    elu_alpha_f64:      dq 1.0
+    ; SELU constants: λ ≈ 1.0507, α ≈ 1.6733
+    selu_lambda_f64:    dq 1.0507009873554805
+    selu_alpha_f64:     dq 1.6732632423543772
 
 section .bss
     align 32
@@ -65,14 +74,35 @@ global node_tanh
 global node_softmax
 global node_gelu
 global node_leaky_relu
+global node_elu
+global node_selu
+global node_swish
+global node_mish
+global node_hardswish
+global node_softplus
+global node_hardtanh
 global relu_backward
 global sigmoid_backward
 global tanh_backward
 global softmax_backward
 global gelu_backward
 global leaky_relu_backward
+global elu_backward
+global selu_backward
+global swish_backward
+global mish_backward
+global hardswish_backward
+global softplus_backward
+global hardtanh_backward
 global gelu_forward
 global leaky_relu_forward
+global elu_forward
+global selu_forward
+global swish_forward
+global mish_forward
+global hardswish_forward
+global softplus_forward
+global hardtanh_forward
 
 ; =============================================================================
 ; node_relu - ReLU activation: out = max(0, x)
@@ -1920,6 +1950,348 @@ leaky_relu_backward:
 
 .leaky_bwd_done:
     add rsp, 24
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; ELU (Exponential Linear Unit)
+; ELU(x) = x if x > 0, else α * (exp(x) - 1)
+; =============================================================================
+
+; =============================================================================
+; elu_forward - ELU forward pass (tensor-only, no autograd)
+; Arguments:
+;   RDI = Tensor* out
+;   RSI = Tensor* x
+;   XMM0 = double alpha (default 1.0)
+; =============================================================================
+elu_forward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 24
+    
+    mov r12, rdi                    ; out
+    mov r13, rsi                    ; x
+    movsd [rsp], xmm0               ; alpha
+    
+    mov rdi, r13
+    call tensor_numel
+    mov r14, rax
+    
+    mov rdi, [r12 + TENSOR_DATA]
+    mov rsi, [r13 + TENSOR_DATA]
+    movsd xmm1, [rsp]               ; alpha
+    
+    mov eax, [r12 + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .elu_fwd_f32
+    
+    ; float64
+    xor rcx, rcx
+.elu_fwd_f64_loop:
+    cmp rcx, r14
+    jge .elu_fwd_done
+    movsd xmm0, [rsi + rcx*8]       ; x
+    
+    xorpd xmm2, xmm2
+    comisd xmm0, xmm2
+    jae .elu_fwd_f64_pos
+    
+    ; x < 0: alpha * (exp(x) - 1)
+    sub rsp, 16
+    mov [rsp], rcx
+    movsd [rsp+8], xmm1
+    call exp wrt ..plt
+    mov rcx, [rsp]
+    movsd xmm1, [rsp+8]
+    add rsp, 16
+    
+    movsd xmm2, [rel one_f64]
+    subsd xmm0, xmm2                ; exp(x) - 1
+    mulsd xmm0, xmm1                ; alpha * (exp(x) - 1)
+    jmp .elu_fwd_f64_store
+
+.elu_fwd_f64_pos:
+    ; x >= 0: output = x (already in xmm0)
+.elu_fwd_f64_store:
+    movsd [rdi + rcx*8], xmm0
+    inc rcx
+    jmp .elu_fwd_f64_loop
+
+.elu_fwd_f32:
+    cvtsd2ss xmm1, xmm1
+    xor rcx, rcx
+.elu_fwd_f32_loop:
+    cmp rcx, r14
+    jge .elu_fwd_done
+    movss xmm0, [rsi + rcx*4]
+    
+    xorps xmm2, xmm2
+    comiss xmm0, xmm2
+    jae .elu_fwd_f32_pos
+    
+    ; x < 0: alpha * (exp(x) - 1)
+    cvtss2sd xmm0, xmm0
+    sub rsp, 16
+    mov [rsp], rcx
+    movss [rsp+8], xmm1
+    call exp wrt ..plt
+    mov rcx, [rsp]
+    movss xmm1, [rsp+8]
+    add rsp, 16
+    
+    movsd xmm2, [rel one_f64]
+    subsd xmm0, xmm2
+    cvtss2sd xmm3, xmm1
+    mulsd xmm0, xmm3
+    cvtsd2ss xmm0, xmm0
+    jmp .elu_fwd_f32_store
+
+.elu_fwd_f32_pos:
+.elu_fwd_f32_store:
+    movss [rdi + rcx*4], xmm0
+    inc rcx
+    jmp .elu_fwd_f32_loop
+
+.elu_fwd_done:
+    add rsp, 24
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; node_elu - ELU activation with autograd
+; Arguments:
+;   RDI = Node* x
+;   XMM0 = double alpha
+; Returns:
+;   RAX = Node* out
+; =============================================================================
+node_elu:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 32
+    
+    mov r12, rdi                    ; input node
+    movsd [rsp], xmm0               ; save alpha
+    
+    ; Create output tensor
+    mov rax, [r12 + NODE_VALUE]
+    mov rdi, [rax + TENSOR_NDIM]
+    mov rsi, [rax + TENSOR_SHAPE]
+    mov edx, [rax + TENSOR_DTYPE]
+    call tensor_create
+    test rax, rax
+    jz .elu_node_alloc_failed
+    mov r13, rax                    ; output tensor
+    
+    ; Compute ELU
+    mov rdi, r13
+    mov rsi, [r12 + NODE_VALUE]
+    movsd xmm0, [rsp]
+    call elu_forward
+    
+    ; Create node
+    mov rdi, r13
+    mov rsi, 1
+    call node_create
+    test rax, rax
+    jz .elu_node_alloc_failed
+    mov rbx, rax
+    
+    ; Set backward function
+    lea rax, [rel elu_backward]
+    mov [rbx + NODE_BACKWARD_FN], rax
+    
+    ; Set parent
+    mov dword [rbx + NODE_N_PARENTS], 1
+    mov rdi, 8
+    call mem_alloc
+    mov [rbx + NODE_PARENTS], rax
+    mov [rel rax], r12
+    
+    ; Save alpha
+    mov rdi, 8
+    call mem_alloc
+    mov [rbx + NODE_SAVED_TENSORS], rax
+    movsd xmm0, [rsp]
+    movsd [rax], xmm0
+    mov dword [rbx + NODE_N_SAVED], 1
+    
+    mov rax, rbx
+    
+    add rsp, 32
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.elu_node_alloc_failed:
+    xor eax, eax
+    add rsp, 32
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; elu_backward - Backward for ELU
+; dL/dx = dL/dout * (1 if x >= 0 else alpha * exp(x))
+; =============================================================================
+elu_backward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 40
+    
+    mov r12, rdi                    ; self
+    mov r13, [r12 + NODE_GRAD]      ; dL/dout
+    mov r14, [r12 + NODE_PARENTS]
+    mov r15, [rel r14]              ; parent x
+    
+    mov rax, [r15 + NODE_GRAD]
+    test rax, rax
+    jz .elu_bwd_done
+    
+    mov rbx, rax                    ; parent grad tensor
+    
+    ; Get saved alpha
+    mov rax, [r12 + NODE_SAVED_TENSORS]
+    movsd xmm1, [rax]               ; alpha
+    movsd [rsp+32], xmm1
+    
+    mov rdi, [rbx + TENSOR_DATA]    ; grad_x
+    mov rsi, [r13 + TENSOR_DATA]    ; dL/dout
+    mov rdx, [r15 + NODE_VALUE]
+    mov rdx, [rdx + TENSOR_DATA]    ; x
+    
+    mov [rsp], rdi
+    mov [rsp+8], rsi
+    mov [rsp+16], rdx
+    
+    push rbx
+    mov rdi, rbx
+    call tensor_numel
+    mov rcx, rax
+    pop rbx
+    mov [rsp+24], rcx
+    
+    mov rdi, [rsp]
+    mov rsi, [rsp+8]
+    mov rdx, [rsp+16]
+    mov rcx, [rsp+24]
+    movsd xmm1, [rsp+32]
+    
+    mov eax, [rbx + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .elu_bwd_f32
+    
+    ; float64
+    xor r8, r8
+.elu_bwd_f64_loop:
+    cmp r8, rcx
+    jge .elu_bwd_done
+    
+    movsd xmm0, [rdx + r8*8]        ; x
+    movsd xmm2, [rsi + r8*8]        ; dL/dout
+    
+    xorpd xmm3, xmm3
+    comisd xmm0, xmm3
+    jae .elu_bwd_f64_pos
+    
+    ; x < 0: grad = dL/dout * alpha * exp(x)
+    sub rsp, 48
+    mov [rsp], r8
+    mov [rsp+8], rcx
+    movsd [rsp+16], xmm1
+    movsd [rsp+24], xmm2
+    call exp wrt ..plt
+    mov r8, [rsp]
+    mov rcx, [rsp+8]
+    movsd xmm1, [rsp+16]
+    movsd xmm2, [rsp+24]
+    add rsp, 48
+    
+    mulsd xmm0, xmm1                ; alpha * exp(x)
+    mulsd xmm2, xmm0                ; dL/dout * alpha * exp(x)
+    jmp .elu_bwd_f64_acc
+
+.elu_bwd_f64_pos:
+    ; x >= 0: grad = dL/dout * 1.0 (unchanged)
+.elu_bwd_f64_acc:
+    addsd xmm2, [rdi + r8*8]
+    movsd [rdi + r8*8], xmm2
+    
+    inc r8
+    jmp .elu_bwd_f64_loop
+
+.elu_bwd_f32:
+    cvtsd2ss xmm1, xmm1
+    xor r8, r8
+.elu_bwd_f32_loop:
+    cmp r8, rcx
+    jge .elu_bwd_done
+    
+    movss xmm0, [rdx + r8*4]
+    movss xmm2, [rsi + r8*4]
+    
+    xorps xmm3, xmm3
+    comiss xmm0, xmm3
+    jae .elu_bwd_f32_pos
+    
+    cvtss2sd xmm0, xmm0
+    sub rsp, 48
+    mov [rsp], r8
+    mov [rsp+8], rcx
+    movss [rsp+16], xmm1
+    movss [rsp+24], xmm2
+    call exp wrt ..plt
+    mov r8, [rsp]
+    mov rcx, [rsp+8]
+    movss xmm1, [rsp+16]
+    movss xmm2, [rsp+24]
+    add rsp, 48
+    
+    cvtss2sd xmm3, xmm1
+    mulsd xmm0, xmm3
+    cvtsd2ss xmm0, xmm0
+    mulss xmm2, xmm0
+    jmp .elu_bwd_f32_acc
+
+.elu_bwd_f32_pos:
+.elu_bwd_f32_acc:
+    addss xmm2, [rdi + r8*4]
+    movss [rdi + r8*4], xmm2
+    
+    inc r8
+    jmp .elu_bwd_f32_loop
+
+.elu_bwd_done:
+    add rsp, 40
     pop r15
     pop r14
     pop r13

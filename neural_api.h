@@ -419,6 +419,16 @@ int neural_gelu(NeuralTensor* out, const NeuralTensor* input);
  */
 int neural_leaky_relu(NeuralTensor* out, const NeuralTensor* input, double alpha);
 
+/**
+ * @brief ELU activation (Exponential Linear Unit)
+ * ELU(x) = x if x > 0, else alpha * (exp(x) - 1)
+ * @param out Output tensor
+ * @param input Input tensor
+ * @param alpha Scale for negative values (typically 1.0)
+ * @return NEURAL_OK on success, error code on failure
+ */
+int neural_elu(NeuralTensor* out, const NeuralTensor* input, double alpha);
+
 /* ============================================================================ */
 /* Neural Network Layers */
 /* ============================================================================ */

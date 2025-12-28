@@ -79,6 +79,13 @@ extern softmax_forward
 extern tanh_forward
 extern gelu_forward
 extern leaky_relu_forward
+extern elu_forward
+extern selu_forward
+extern swish_forward
+extern mish_forward
+extern hardswish_forward
+extern softplus_forward
+extern hardtanh_forward
 
 ; Note: linear_free, optimizer_step, dataset_size may not exist in all implementations
 extern linear_create
@@ -157,6 +164,13 @@ global neural_tanh
 global neural_softmax
 global neural_gelu
 global neural_leaky_relu
+global neural_elu
+global neural_selu
+global neural_swish
+global neural_mish
+global neural_hardswish
+global neural_softplus
+global neural_hardtanh
 global neural_linear_create
 global neural_linear_free
 global neural_linear_forward
@@ -1201,6 +1215,37 @@ neural_leaky_relu:
     mov [rel last_error], eax
 
 .leaky_api_done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_elu - ELU activation
+; Arguments:
+;   RDI = NeuralTensor* out
+;   RSI = const NeuralTensor* x
+;   XMM0 = double alpha (default 1.0)
+; Returns: int (error code)
+; =============================================================================
+neural_elu:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .elu_api_null
+    test rsi, rsi
+    jz .elu_api_null
+    
+    call elu_forward
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .elu_api_done
+
+.elu_api_null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.elu_api_done:
     pop rbp
     ret
 
