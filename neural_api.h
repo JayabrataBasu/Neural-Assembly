@@ -439,6 +439,51 @@ int neural_elu(NeuralTensor* out, const NeuralTensor* input, double alpha);
  */
 int neural_selu(NeuralTensor* out, const NeuralTensor* input);
 
+/**
+ * @brief Swish/SiLU activation (Sigmoid Linear Unit)
+ * Swish(x) = x * sigmoid(x) = x / (1 + exp(-x))
+ * @param out Output tensor
+ * @param input Input tensor
+ * @return NEURAL_OK on success, error code on failure
+ */
+int neural_swish(NeuralTensor* out, const NeuralTensor* input);
+
+/**
+ * @brief Mish activation
+ * Mish(x) = x * tanh(softplus(x)) = x * tanh(ln(1 + exp(x)))
+ * @param out Output tensor
+ * @param input Input tensor
+ * @return NEURAL_OK on success, error code on failure
+ */
+int neural_mish(NeuralTensor* out, const NeuralTensor* input);
+
+/**
+ * @brief Hard Swish activation (efficient approximation of Swish)
+ * HardSwish(x) = 0 if x <= -3, x if x >= 3, else x * (x + 3) / 6
+ * @param out Output tensor
+ * @param input Input tensor
+ * @return NEURAL_OK on success, error code on failure
+ */
+int neural_hardswish(NeuralTensor* out, const NeuralTensor* input);
+
+/**
+ * @brief Softplus activation (smooth ReLU approximation)
+ * Softplus(x) = ln(1 + exp(x))
+ * @param out Output tensor
+ * @param input Input tensor
+ * @return NEURAL_OK on success, error code on failure
+ */
+int neural_softplus(NeuralTensor* out, const NeuralTensor* input);
+
+/**
+ * @brief Hardtanh activation (piecewise linear tanh approximation)
+ * Hardtanh(x) = -1 if x < -1, 1 if x > 1, else x
+ * @param out Output tensor
+ * @param input Input tensor
+ * @return NEURAL_OK on success, error code on failure
+ */
+int neural_hardtanh(NeuralTensor* out, const NeuralTensor* input);
+
 /* ============================================================================ */
 /* Neural Network Layers */
 /* ============================================================================ */

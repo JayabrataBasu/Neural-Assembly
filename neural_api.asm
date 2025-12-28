@@ -1280,6 +1280,156 @@ neural_selu:
     ret
 
 ; =============================================================================
+; neural_swish - Swish/SiLU activation
+; Arguments:
+;   RDI = NeuralTensor* out
+;   RSI = const NeuralTensor* x
+; Returns: int (error code)
+; =============================================================================
+neural_swish:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .swish_api_null
+    test rsi, rsi
+    jz .swish_api_null
+    
+    call swish_forward
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .swish_api_done
+
+.swish_api_null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.swish_api_done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_mish - Mish activation
+; Arguments:
+;   RDI = NeuralTensor* out
+;   RSI = const NeuralTensor* x
+; Returns: int (error code)
+; =============================================================================
+neural_mish:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .mish_api_null
+    test rsi, rsi
+    jz .mish_api_null
+    
+    call mish_forward
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .mish_api_done
+
+.mish_api_null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.mish_api_done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_hardswish - Hard Swish activation
+; Arguments:
+;   RDI = NeuralTensor* out
+;   RSI = const NeuralTensor* x
+; Returns: int (error code)
+; =============================================================================
+neural_hardswish:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .hardswish_api_null
+    test rsi, rsi
+    jz .hardswish_api_null
+    
+    call hardswish_forward
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .hardswish_api_done
+
+.hardswish_api_null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.hardswish_api_done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_softplus - Softplus activation
+; Arguments:
+;   RDI = NeuralTensor* out
+;   RSI = const NeuralTensor* x
+; Returns: int (error code)
+; =============================================================================
+neural_softplus:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .softplus_api_null
+    test rsi, rsi
+    jz .softplus_api_null
+    
+    call softplus_forward
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .softplus_api_done
+
+.softplus_api_null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.softplus_api_done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_hardtanh - Hardtanh activation
+; Arguments:
+;   RDI = NeuralTensor* out
+;   RSI = const NeuralTensor* x
+; Returns: int (error code)
+; =============================================================================
+neural_hardtanh:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .hardtanh_api_null
+    test rsi, rsi
+    jz .hardtanh_api_null
+    
+    call hardtanh_forward
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .hardtanh_api_done
+
+.hardtanh_api_null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.hardtanh_api_done:
+    pop rbp
+    ret
+
+; =============================================================================
 ; neural_linear_create - Create linear layer
 ; Arguments:
 ;   RDI = uint64_t in_features

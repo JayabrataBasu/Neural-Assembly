@@ -2643,5 +2643,1662 @@ selu_backward:
     pop rbp
     ret
 
+; =============================================================================
+; SWISH (Sigmoid Linear Unit / SiLU)
+; Swish(x) = x * sigmoid(x) = x / (1 + exp(-x))
+; =============================================================================
+
+; =============================================================================
+; swish_forward - Swish forward pass (tensor-only, no autograd)
+; Arguments:
+;   RDI = Tensor* out
+;   RSI = Tensor* x
+; =============================================================================
+swish_forward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 8
+    
+    mov r12, rdi                    ; out
+    mov r13, rsi                    ; x
+    
+    mov rdi, r13
+    call tensor_numel
+    mov r14, rax
+    
+    mov rdi, [r12 + TENSOR_DATA]
+    mov rsi, [r13 + TENSOR_DATA]
+    
+    mov eax, [r12 + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .swish_fwd_f32
+    
+    ; float64: swish(x) = x * sigmoid(x) = x / (1 + exp(-x))
+    xor rcx, rcx
+.swish_fwd_f64_loop:
+    cmp rcx, r14
+    jge .swish_fwd_done
+    movsd xmm1, [rsi + rcx*8]       ; x (save for later)
+    
+    ; Compute sigmoid(x) = 1 / (1 + exp(-x))
+    xorpd xmm0, xmm0
+    subsd xmm0, xmm1                ; -x
+    
+    sub rsp, 24
+    mov [rsp], rcx
+    movsd [rsp+8], xmm1
+    call exp wrt ..plt              ; exp(-x)
+    mov rcx, [rsp]
+    movsd xmm1, [rsp+8]
+    add rsp, 24
+    
+    movsd xmm2, [rel one_f64]
+    addsd xmm0, xmm2                ; 1 + exp(-x)
+    divsd xmm2, xmm0                ; sigmoid = 1 / (1 + exp(-x))
+    
+    mulsd xmm2, xmm1                ; x * sigmoid(x)
+    movsd [rdi + rcx*8], xmm2
+    inc rcx
+    jmp .swish_fwd_f64_loop
+
+.swish_fwd_f32:
+    xor rcx, rcx
+.swish_fwd_f32_loop:
+    cmp rcx, r14
+    jge .swish_fwd_done
+    movss xmm1, [rsi + rcx*4]
+    cvtss2sd xmm1, xmm1             ; x
+    
+    xorpd xmm0, xmm0
+    subsd xmm0, xmm1                ; -x
+    
+    sub rsp, 24
+    mov [rsp], rcx
+    movsd [rsp+8], xmm1
+    call exp wrt ..plt
+    mov rcx, [rsp]
+    movsd xmm1, [rsp+8]
+    add rsp, 24
+    
+    movsd xmm2, [rel one_f64]
+    addsd xmm0, xmm2
+    divsd xmm2, xmm0                ; sigmoid
+    
+    mulsd xmm2, xmm1
+    cvtsd2ss xmm2, xmm2
+    movss [rdi + rcx*4], xmm2
+    inc rcx
+    jmp .swish_fwd_f32_loop
+
+.swish_fwd_done:
+    add rsp, 8
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; node_swish - Swish activation with autograd
+; Arguments:
+;   RDI = Node* x
+; Returns:
+;   RAX = Node* out
+; =============================================================================
+node_swish:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 24
+    
+    mov r12, rdi                    ; input node
+    
+    ; Create output tensor
+    mov rax, [r12 + NODE_VALUE]
+    mov rdi, [rax + TENSOR_NDIM]
+    mov rsi, [rax + TENSOR_SHAPE]
+    mov edx, [rax + TENSOR_DTYPE]
+    call tensor_create
+    test rax, rax
+    jz .swish_node_alloc_failed
+    mov r13, rax                    ; output tensor
+    
+    ; Compute Swish
+    mov rdi, r13
+    mov rsi, [r12 + NODE_VALUE]
+    call swish_forward
+    
+    ; Create node
+    mov rdi, r13
+    mov rsi, 1
+    call node_create
+    test rax, rax
+    jz .swish_node_alloc_failed
+    mov rbx, rax
+    
+    ; Set backward function
+    lea rax, [rel swish_backward]
+    mov [rbx + NODE_BACKWARD_FN], rax
+    
+    ; Set parent
+    mov dword [rbx + NODE_N_PARENTS], 1
+    mov rdi, 8
+    call mem_alloc
+    mov [rbx + NODE_PARENTS], rax
+    mov [rel rax], r12
+    
+    mov rax, rbx
+    
+    add rsp, 24
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.swish_node_alloc_failed:
+    xor eax, eax
+    add rsp, 24
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; swish_backward - Backward for Swish
+; dSwish/dx = sigmoid(x) + x * sigmoid(x) * (1 - sigmoid(x))
+;           = sigmoid(x) * (1 + x * (1 - sigmoid(x)))
+;           = swish(x) + sigmoid(x) * (1 - swish(x))
+; =============================================================================
+swish_backward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 40
+    
+    mov r12, rdi                    ; self
+    mov r13, [r12 + NODE_GRAD]      ; dL/dout
+    mov r14, [r12 + NODE_PARENTS]
+    mov r15, [rel r14]              ; parent x
+    
+    mov rax, [r15 + NODE_GRAD]
+    test rax, rax
+    jz .swish_bwd_done
+    
+    mov rbx, rax                    ; parent grad tensor
+    
+    mov rdi, [rbx + TENSOR_DATA]    ; grad_x
+    mov rsi, [r13 + TENSOR_DATA]    ; dL/dout
+    mov rdx, [r15 + NODE_VALUE]
+    mov rdx, [rdx + TENSOR_DATA]    ; x
+    mov r8, [r12 + NODE_VALUE]
+    mov r8, [r8 + TENSOR_DATA]      ; swish(x) = output
+    
+    mov [rsp], rdi
+    mov [rsp+8], rsi
+    mov [rsp+16], rdx
+    mov [rsp+24], r8
+    
+    push rbx
+    mov rdi, rbx
+    call tensor_numel
+    mov rcx, rax
+    pop rbx
+    
+    mov rdi, [rsp]                  ; grad_x
+    mov rsi, [rsp+8]                ; dL/dout
+    mov rdx, [rsp+16]               ; x
+    mov r8, [rsp+24]                ; swish(x)
+    
+    mov eax, [rbx + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .swish_bwd_f32
+    
+    ; float64
+    xor r9, r9
+.swish_bwd_f64_loop:
+    cmp r9, rcx
+    jge .swish_bwd_done
+    
+    movsd xmm0, [rdx + r9*8]        ; x
+    movsd xmm4, [r8 + r9*8]         ; swish(x)
+    movsd xmm5, [rsi + r9*8]        ; dL/dout
+    
+    ; Compute sigmoid(x)
+    xorpd xmm1, xmm1
+    subsd xmm1, xmm0                ; -x
+    
+    sub rsp, 48
+    mov [rsp], r9
+    mov [rsp+8], rcx
+    movsd [rsp+16], xmm4
+    movsd [rsp+24], xmm5
+    movsd [rsp+32], xmm0
+    movsd xmm0, xmm1
+    call exp wrt ..plt
+    mov r9, [rsp]
+    mov rcx, [rsp+8]
+    movsd xmm4, [rsp+16]
+    movsd xmm5, [rsp+24]
+    movsd xmm1, [rsp+32]            ; x
+    add rsp, 48
+    
+    movsd xmm2, [rel one_f64]
+    addsd xmm0, xmm2                ; 1 + exp(-x)
+    movsd xmm3, xmm2
+    divsd xmm3, xmm0                ; sigmoid(x)
+    
+    ; grad = sigmoid + swish * (1 - sigmoid)
+    movsd xmm6, xmm2                ; 1
+    subsd xmm6, xmm3                ; 1 - sigmoid
+    mulsd xmm6, xmm4                ; swish * (1 - sigmoid)
+    addsd xmm6, xmm3                ; sigmoid + swish * (1 - sigmoid)
+    
+    mulsd xmm6, xmm5                ; * dL/dout
+    addsd xmm6, [rdi + r9*8]
+    movsd [rdi + r9*8], xmm6
+    
+    inc r9
+    jmp .swish_bwd_f64_loop
+
+.swish_bwd_f32:
+    xor r9, r9
+.swish_bwd_f32_loop:
+    cmp r9, rcx
+    jge .swish_bwd_done
+    
+    movss xmm0, [rdx + r9*4]
+    cvtss2sd xmm0, xmm0             ; x
+    movss xmm4, [r8 + r9*4]
+    cvtss2sd xmm4, xmm4             ; swish(x)
+    movss xmm5, [rsi + r9*4]
+    cvtss2sd xmm5, xmm5             ; dL/dout
+    
+    xorpd xmm1, xmm1
+    subsd xmm1, xmm0
+    
+    sub rsp, 48
+    mov [rsp], r9
+    mov [rsp+8], rcx
+    movsd [rsp+16], xmm4
+    movsd [rsp+24], xmm5
+    movsd [rsp+32], xmm0
+    movsd xmm0, xmm1
+    call exp wrt ..plt
+    mov r9, [rsp]
+    mov rcx, [rsp+8]
+    movsd xmm4, [rsp+16]
+    movsd xmm5, [rsp+24]
+    movsd xmm1, [rsp+32]
+    add rsp, 48
+    
+    movsd xmm2, [rel one_f64]
+    addsd xmm0, xmm2
+    movsd xmm3, xmm2
+    divsd xmm3, xmm0                ; sigmoid(x)
+    
+    movsd xmm6, xmm2
+    subsd xmm6, xmm3
+    mulsd xmm6, xmm4
+    addsd xmm6, xmm3
+    
+    mulsd xmm6, xmm5
+    cvtsd2ss xmm6, xmm6
+    addss xmm6, [rdi + r9*4]
+    movss [rdi + r9*4], xmm6
+    
+    inc r9
+    jmp .swish_bwd_f32_loop
+
+.swish_bwd_done:
+    add rsp, 40
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; MISH Activation
+; Mish(x) = x * tanh(softplus(x)) = x * tanh(ln(1 + exp(x)))
+; =============================================================================
+
+; =============================================================================
+; mish_forward - Mish forward pass (tensor-only, no autograd)
+; Arguments:
+;   RDI = Tensor* out
+;   RSI = Tensor* x
+; =============================================================================
+mish_forward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 8
+    
+    mov r12, rdi                    ; out
+    mov r13, rsi                    ; x
+    
+    mov rdi, r13
+    call tensor_numel
+    mov r14, rax
+    
+    mov rdi, [r12 + TENSOR_DATA]
+    mov rsi, [r13 + TENSOR_DATA]
+    
+    mov eax, [r12 + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .mish_fwd_f32
+    
+    ; float64: mish(x) = x * tanh(ln(1 + exp(x)))
+    xor rcx, rcx
+.mish_fwd_f64_loop:
+    cmp rcx, r14
+    jge .mish_fwd_done
+    movsd xmm1, [rsi + rcx*8]       ; x
+    
+    ; Compute exp(x)
+    movsd xmm0, xmm1
+    
+    sub rsp, 24
+    mov [rsp], rcx
+    movsd [rsp+8], xmm1
+    call exp wrt ..plt              ; exp(x)
+    mov rcx, [rsp]
+    movsd xmm1, [rsp+8]             ; x
+    add rsp, 24
+    
+    ; softplus = ln(1 + exp(x))
+    movsd xmm2, [rel one_f64]
+    addsd xmm0, xmm2                ; 1 + exp(x)
+    
+    sub rsp, 24
+    mov [rsp], rcx
+    movsd [rsp+8], xmm1
+    call log wrt ..plt              ; ln(1 + exp(x)) = softplus
+    mov rcx, [rsp]
+    movsd xmm1, [rsp+8]
+    add rsp, 24
+    
+    ; tanh(softplus)
+    sub rsp, 24
+    mov [rsp], rcx
+    movsd [rsp+8], xmm1
+    call tanh wrt ..plt
+    mov rcx, [rsp]
+    movsd xmm1, [rsp+8]
+    add rsp, 24
+    
+    ; x * tanh(softplus)
+    mulsd xmm0, xmm1
+    movsd [rdi + rcx*8], xmm0
+    inc rcx
+    jmp .mish_fwd_f64_loop
+
+.mish_fwd_f32:
+    xor rcx, rcx
+.mish_fwd_f32_loop:
+    cmp rcx, r14
+    jge .mish_fwd_done
+    movss xmm1, [rsi + rcx*4]
+    cvtss2sd xmm1, xmm1             ; x
+    
+    movsd xmm0, xmm1
+    
+    sub rsp, 24
+    mov [rsp], rcx
+    movsd [rsp+8], xmm1
+    call exp wrt ..plt
+    mov rcx, [rsp]
+    movsd xmm1, [rsp+8]
+    add rsp, 24
+    
+    movsd xmm2, [rel one_f64]
+    addsd xmm0, xmm2
+    
+    sub rsp, 24
+    mov [rsp], rcx
+    movsd [rsp+8], xmm1
+    call log wrt ..plt
+    mov rcx, [rsp]
+    movsd xmm1, [rsp+8]
+    add rsp, 24
+    
+    sub rsp, 24
+    mov [rsp], rcx
+    movsd [rsp+8], xmm1
+    call tanh wrt ..plt
+    mov rcx, [rsp]
+    movsd xmm1, [rsp+8]
+    add rsp, 24
+    
+    mulsd xmm0, xmm1
+    cvtsd2ss xmm0, xmm0
+    movss [rdi + rcx*4], xmm0
+    inc rcx
+    jmp .mish_fwd_f32_loop
+
+.mish_fwd_done:
+    add rsp, 8
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; node_mish - Mish activation with autograd
+; Arguments:
+;   RDI = Node* x
+; Returns:
+;   RAX = Node* out
+; =============================================================================
+node_mish:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 24
+    
+    mov r12, rdi                    ; input node
+    
+    ; Create output tensor
+    mov rax, [r12 + NODE_VALUE]
+    mov rdi, [rax + TENSOR_NDIM]
+    mov rsi, [rax + TENSOR_SHAPE]
+    mov edx, [rax + TENSOR_DTYPE]
+    call tensor_create
+    test rax, rax
+    jz .mish_node_alloc_failed
+    mov r13, rax                    ; output tensor
+    
+    ; Compute Mish
+    mov rdi, r13
+    mov rsi, [r12 + NODE_VALUE]
+    call mish_forward
+    
+    ; Create node
+    mov rdi, r13
+    mov rsi, 1
+    call node_create
+    test rax, rax
+    jz .mish_node_alloc_failed
+    mov rbx, rax
+    
+    ; Set backward function
+    lea rax, [rel mish_backward]
+    mov [rbx + NODE_BACKWARD_FN], rax
+    
+    ; Set parent
+    mov dword [rbx + NODE_N_PARENTS], 1
+    mov rdi, 8
+    call mem_alloc
+    mov [rbx + NODE_PARENTS], rax
+    mov [rel rax], r12
+    
+    mov rax, rbx
+    
+    add rsp, 24
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.mish_node_alloc_failed:
+    xor eax, eax
+    add rsp, 24
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; mish_backward - Backward for Mish
+; dMish/dx = exp(x) * (4*(x+1) + 4*exp(2x) + exp(3x) + exp(x)*(4x+6)) / (2*exp(x) + exp(2x) + 2)^2
+; Simplified: gradient = tanh(softplus) + x * sech^2(softplus) * sigmoid(x)
+; =============================================================================
+mish_backward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 56
+    
+    mov r12, rdi                    ; self
+    mov r13, [r12 + NODE_GRAD]      ; dL/dout
+    mov r14, [r12 + NODE_PARENTS]
+    mov r15, [rel r14]              ; parent x
+    
+    mov rax, [r15 + NODE_GRAD]
+    test rax, rax
+    jz .mish_bwd_done
+    
+    mov rbx, rax                    ; parent grad tensor
+    
+    mov rdi, [rbx + TENSOR_DATA]    ; grad_x
+    mov rsi, [r13 + TENSOR_DATA]    ; dL/dout
+    mov rdx, [r15 + NODE_VALUE]
+    mov rdx, [rdx + TENSOR_DATA]    ; x
+    
+    mov [rsp], rdi
+    mov [rsp+8], rsi
+    mov [rsp+16], rdx
+    
+    push rbx
+    mov rdi, rbx
+    call tensor_numel
+    mov rcx, rax
+    pop rbx
+    
+    mov rdi, [rsp]
+    mov rsi, [rsp+8]
+    mov rdx, [rsp+16]
+    
+    mov eax, [rbx + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .mish_bwd_f32
+    
+    ; float64
+    xor r8, r8
+.mish_bwd_f64_loop:
+    cmp r8, rcx
+    jge .mish_bwd_done
+    
+    movsd xmm0, [rdx + r8*8]        ; x
+    movsd [rsp+24], xmm0            ; save x
+    mov [rsp+32], r8
+    mov [rsp+40], rcx
+    
+    ; exp(x)
+    call exp wrt ..plt
+    movsd [rsp+48], xmm0            ; save exp(x)
+    
+    ; softplus = ln(1 + exp(x))
+    movsd xmm2, [rel one_f64]
+    addsd xmm0, xmm2
+    call log wrt ..plt
+    movsd xmm3, xmm0                ; softplus
+    
+    ; tanh(softplus)
+    call tanh wrt ..plt
+    movsd xmm4, xmm0                ; tanh(softplus)
+    
+    ; sech^2(softplus) = 1 - tanh^2(softplus)
+    movsd xmm5, xmm4
+    mulsd xmm5, xmm5                ; tanh^2
+    movsd xmm6, [rel one_f64]
+    subsd xmm6, xmm5                ; sech^2
+    
+    ; sigmoid(x) = exp(x) / (1 + exp(x))
+    movsd xmm7, [rsp+48]            ; exp(x)
+    movsd xmm1, [rel one_f64]
+    addsd xmm1, xmm7                ; 1 + exp(x)
+    divsd xmm7, xmm1                ; sigmoid(x)
+    
+    ; grad = tanh(softplus) + x * sech^2(softplus) * sigmoid(x)
+    movsd xmm0, [rsp+24]            ; x
+    mulsd xmm0, xmm6                ; x * sech^2
+    mulsd xmm0, xmm7                ; x * sech^2 * sigmoid
+    addsd xmm0, xmm4                ; + tanh(softplus)
+    
+    ; Multiply by upstream gradient
+    mov r8, [rsp+32]
+    mov rcx, [rsp+40]
+    movsd xmm1, [rsi + r8*8]        ; dL/dout
+    mulsd xmm0, xmm1
+    
+    addsd xmm0, [rdi + r8*8]
+    movsd [rdi + r8*8], xmm0
+    
+    inc r8
+    jmp .mish_bwd_f64_loop
+
+.mish_bwd_f32:
+    xor r8, r8
+.mish_bwd_f32_loop:
+    cmp r8, rcx
+    jge .mish_bwd_done
+    
+    movss xmm0, [rdx + r8*4]
+    cvtss2sd xmm0, xmm0             ; x
+    movsd [rsp+24], xmm0
+    mov [rsp+32], r8
+    mov [rsp+40], rcx
+    
+    call exp wrt ..plt
+    movsd [rsp+48], xmm0
+    
+    movsd xmm2, [rel one_f64]
+    addsd xmm0, xmm2
+    call log wrt ..plt
+    movsd xmm3, xmm0
+    
+    call tanh wrt ..plt
+    movsd xmm4, xmm0
+    
+    movsd xmm5, xmm4
+    mulsd xmm5, xmm5
+    movsd xmm6, [rel one_f64]
+    subsd xmm6, xmm5
+    
+    movsd xmm7, [rsp+48]
+    movsd xmm1, [rel one_f64]
+    addsd xmm1, xmm7
+    divsd xmm7, xmm1
+    
+    movsd xmm0, [rsp+24]
+    mulsd xmm0, xmm6
+    mulsd xmm0, xmm7
+    addsd xmm0, xmm4
+    
+    mov r8, [rsp+32]
+    mov rcx, [rsp+40]
+    movss xmm1, [rsi + r8*4]
+    cvtss2sd xmm1, xmm1
+    mulsd xmm0, xmm1
+    
+    cvtsd2ss xmm0, xmm0
+    addss xmm0, [rdi + r8*4]
+    movss [rdi + r8*4], xmm0
+    
+    inc r8
+    jmp .mish_bwd_f32_loop
+
+.mish_bwd_done:
+    add rsp, 56
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; HARD SWISH Activation
+; HardSwish(x) = x * ReLU6(x + 3) / 6
+;              = x * min(max(x + 3, 0), 6) / 6
+;              = 0                 if x <= -3
+;              = x                 if x >= 3
+;              = x * (x + 3) / 6   otherwise
+; =============================================================================
+
+; =============================================================================
+; hardswish_forward - Hard Swish forward pass (tensor-only, no autograd)
+; Arguments:
+;   RDI = Tensor* out
+;   RSI = Tensor* x
+; =============================================================================
+hardswish_forward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 8
+    
+    mov r12, rdi                    ; out
+    mov r13, rsi                    ; x
+    
+    mov rdi, r13
+    call tensor_numel
+    mov r14, rax
+    
+    mov rdi, [r12 + TENSOR_DATA]
+    mov rsi, [r13 + TENSOR_DATA]
+    
+    mov eax, [r12 + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .hardswish_fwd_f32
+    
+    ; float64
+    movsd xmm4, [rel three_f64]     ; 3.0
+    movsd xmm5, [rel six_f64]       ; 6.0
+    xorpd xmm6, xmm6                ; 0.0
+    movsd xmm7, xmm4
+    xorpd xmm3, xmm3
+    subsd xmm3, xmm4                ; -3.0
+    
+    xor rcx, rcx
+.hardswish_fwd_f64_loop:
+    cmp rcx, r14
+    jge .hardswish_fwd_done
+    movsd xmm0, [rsi + rcx*8]       ; x
+    
+    ; Check if x <= -3
+    comisd xmm0, xmm3
+    jbe .hardswish_fwd_f64_zero
+    
+    ; Check if x >= 3
+    comisd xmm0, xmm4
+    jae .hardswish_fwd_f64_linear
+    
+    ; Middle: x * (x + 3) / 6
+    movsd xmm1, xmm0
+    addsd xmm1, xmm4                ; x + 3
+    mulsd xmm1, xmm0                ; x * (x + 3)
+    divsd xmm1, xmm5                ; / 6
+    movsd [rdi + rcx*8], xmm1
+    jmp .hardswish_fwd_f64_next
+
+.hardswish_fwd_f64_zero:
+    movsd [rdi + rcx*8], xmm6
+    jmp .hardswish_fwd_f64_next
+
+.hardswish_fwd_f64_linear:
+    movsd [rdi + rcx*8], xmm0
+    
+.hardswish_fwd_f64_next:
+    inc rcx
+    jmp .hardswish_fwd_f64_loop
+
+.hardswish_fwd_f32:
+    movsd xmm4, [rel three_f64]
+    movsd xmm5, [rel six_f64]
+    xorpd xmm6, xmm6
+    movsd xmm3, xmm6
+    subsd xmm3, xmm4                ; -3.0
+    
+    xor rcx, rcx
+.hardswish_fwd_f32_loop:
+    cmp rcx, r14
+    jge .hardswish_fwd_done
+    movss xmm0, [rsi + rcx*4]
+    cvtss2sd xmm0, xmm0
+    
+    comisd xmm0, xmm3
+    jbe .hardswish_fwd_f32_zero
+    
+    comisd xmm0, xmm4
+    jae .hardswish_fwd_f32_linear
+    
+    movsd xmm1, xmm0
+    addsd xmm1, xmm4
+    mulsd xmm1, xmm0
+    divsd xmm1, xmm5
+    cvtsd2ss xmm1, xmm1
+    movss [rdi + rcx*4], xmm1
+    jmp .hardswish_fwd_f32_next
+
+.hardswish_fwd_f32_zero:
+    xorps xmm1, xmm1
+    movss [rdi + rcx*4], xmm1
+    jmp .hardswish_fwd_f32_next
+
+.hardswish_fwd_f32_linear:
+    cvtsd2ss xmm0, xmm0
+    movss [rdi + rcx*4], xmm0
+    
+.hardswish_fwd_f32_next:
+    inc rcx
+    jmp .hardswish_fwd_f32_loop
+
+.hardswish_fwd_done:
+    add rsp, 8
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; node_hardswish - Hard Swish activation with autograd
+; Arguments:
+;   RDI = Node* x
+; Returns:
+;   RAX = Node* out
+; =============================================================================
+node_hardswish:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 24
+    
+    mov r12, rdi                    ; input node
+    
+    ; Create output tensor
+    mov rax, [r12 + NODE_VALUE]
+    mov rdi, [rax + TENSOR_NDIM]
+    mov rsi, [rax + TENSOR_SHAPE]
+    mov edx, [rax + TENSOR_DTYPE]
+    call tensor_create
+    test rax, rax
+    jz .hardswish_node_alloc_failed
+    mov r13, rax                    ; output tensor
+    
+    ; Compute Hard Swish
+    mov rdi, r13
+    mov rsi, [r12 + NODE_VALUE]
+    call hardswish_forward
+    
+    ; Create node
+    mov rdi, r13
+    mov rsi, 1
+    call node_create
+    test rax, rax
+    jz .hardswish_node_alloc_failed
+    mov rbx, rax
+    
+    ; Set backward function
+    lea rax, [rel hardswish_backward]
+    mov [rbx + NODE_BACKWARD_FN], rax
+    
+    ; Set parent
+    mov dword [rbx + NODE_N_PARENTS], 1
+    mov rdi, 8
+    call mem_alloc
+    mov [rbx + NODE_PARENTS], rax
+    mov [rel rax], r12
+    
+    mov rax, rbx
+    
+    add rsp, 24
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.hardswish_node_alloc_failed:
+    xor eax, eax
+    add rsp, 24
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; hardswish_backward - Backward for Hard Swish
+; dHardSwish/dx = 0           if x <= -3
+;               = 1           if x >= 3
+;               = (2x + 3)/6  otherwise
+; =============================================================================
+hardswish_backward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 24
+    
+    mov r12, rdi                    ; self
+    mov r13, [r12 + NODE_GRAD]      ; dL/dout
+    mov r14, [r12 + NODE_PARENTS]
+    mov r15, [rel r14]              ; parent x
+    
+    mov rax, [r15 + NODE_GRAD]
+    test rax, rax
+    jz .hardswish_bwd_done
+    
+    mov rbx, rax                    ; parent grad tensor
+    
+    mov rdi, [rbx + TENSOR_DATA]    ; grad_x
+    mov rsi, [r13 + TENSOR_DATA]    ; dL/dout
+    mov rdx, [r15 + NODE_VALUE]
+    mov rdx, [rdx + TENSOR_DATA]    ; x
+    
+    mov [rsp], rdi
+    mov [rsp+8], rsi
+    mov [rsp+16], rdx
+    
+    push rbx
+    mov rdi, rbx
+    call tensor_numel
+    mov rcx, rax
+    pop rbx
+    
+    mov rdi, [rsp]
+    mov rsi, [rsp+8]
+    mov rdx, [rsp+16]
+    
+    mov eax, [rbx + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .hardswish_bwd_f32
+    
+    ; float64
+    movsd xmm4, [rel three_f64]     ; 3.0
+    movsd xmm5, [rel six_f64]       ; 6.0
+    movsd xmm6, [rel two_f64]       ; 2.0
+    xorpd xmm7, xmm7
+    subsd xmm7, xmm4                ; -3.0
+    
+    xor r8, r8
+.hardswish_bwd_f64_loop:
+    cmp r8, rcx
+    jge .hardswish_bwd_done
+    
+    movsd xmm0, [rdx + r8*8]        ; x
+    movsd xmm2, [rsi + r8*8]        ; dL/dout
+    
+    ; Check if x <= -3
+    comisd xmm0, xmm7
+    jbe .hardswish_bwd_f64_zero
+    
+    ; Check if x >= 3
+    comisd xmm0, xmm4
+    jae .hardswish_bwd_f64_one
+    
+    ; Middle: (2x + 3) / 6
+    movsd xmm1, xmm0
+    mulsd xmm1, xmm6                ; 2x
+    addsd xmm1, xmm4                ; 2x + 3
+    divsd xmm1, xmm5                ; (2x + 3) / 6
+    mulsd xmm2, xmm1
+    jmp .hardswish_bwd_f64_acc
+
+.hardswish_bwd_f64_zero:
+    xorpd xmm2, xmm2
+    jmp .hardswish_bwd_f64_acc
+
+.hardswish_bwd_f64_one:
+    ; grad stays as dL/dout (multiply by 1)
+    
+.hardswish_bwd_f64_acc:
+    addsd xmm2, [rdi + r8*8]
+    movsd [rdi + r8*8], xmm2
+    
+    inc r8
+    jmp .hardswish_bwd_f64_loop
+
+.hardswish_bwd_f32:
+    movsd xmm4, [rel three_f64]
+    movsd xmm5, [rel six_f64]
+    movsd xmm6, [rel two_f64]
+    xorpd xmm7, xmm7
+    subsd xmm7, xmm4
+    
+    xor r8, r8
+.hardswish_bwd_f32_loop:
+    cmp r8, rcx
+    jge .hardswish_bwd_done
+    
+    movss xmm0, [rdx + r8*4]
+    cvtss2sd xmm0, xmm0
+    movss xmm2, [rsi + r8*4]
+    cvtss2sd xmm2, xmm2
+    
+    comisd xmm0, xmm7
+    jbe .hardswish_bwd_f32_zero
+    
+    comisd xmm0, xmm4
+    jae .hardswish_bwd_f32_one
+    
+    movsd xmm1, xmm0
+    mulsd xmm1, xmm6
+    addsd xmm1, xmm4
+    divsd xmm1, xmm5
+    mulsd xmm2, xmm1
+    jmp .hardswish_bwd_f32_acc
+
+.hardswish_bwd_f32_zero:
+    xorpd xmm2, xmm2
+    jmp .hardswish_bwd_f32_acc
+
+.hardswish_bwd_f32_one:
+    ; grad stays as dL/dout
+
+.hardswish_bwd_f32_acc:
+    cvtsd2ss xmm2, xmm2
+    addss xmm2, [rdi + r8*4]
+    movss [rdi + r8*4], xmm2
+    
+    inc r8
+    jmp .hardswish_bwd_f32_loop
+
+.hardswish_bwd_done:
+    add rsp, 24
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; SOFTPLUS Activation
+; Softplus(x) = ln(1 + exp(x))
+; A smooth approximation of ReLU
+; =============================================================================
+
+; =============================================================================
+; softplus_forward - Softplus forward pass (tensor-only, no autograd)
+; Arguments:
+;   RDI = Tensor* out
+;   RSI = Tensor* x
+; =============================================================================
+softplus_forward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 8
+    
+    mov r12, rdi                    ; out
+    mov r13, rsi                    ; x
+    
+    mov rdi, r13
+    call tensor_numel
+    mov r14, rax
+    
+    mov rdi, [r12 + TENSOR_DATA]
+    mov rsi, [r13 + TENSOR_DATA]
+    
+    mov eax, [r12 + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .softplus_fwd_f32
+    
+    ; float64: softplus(x) = ln(1 + exp(x))
+    xor rcx, rcx
+.softplus_fwd_f64_loop:
+    cmp rcx, r14
+    jge .softplus_fwd_done
+    movsd xmm0, [rsi + rcx*8]       ; x
+    
+    sub rsp, 16
+    mov [rsp], rcx
+    call exp wrt ..plt              ; exp(x)
+    mov rcx, [rsp]
+    add rsp, 16
+    
+    movsd xmm1, [rel one_f64]
+    addsd xmm0, xmm1                ; 1 + exp(x)
+    
+    sub rsp, 16
+    mov [rsp], rcx
+    call log wrt ..plt              ; ln(1 + exp(x))
+    mov rcx, [rsp]
+    add rsp, 16
+    
+    movsd [rdi + rcx*8], xmm0
+    inc rcx
+    jmp .softplus_fwd_f64_loop
+
+.softplus_fwd_f32:
+    xor rcx, rcx
+.softplus_fwd_f32_loop:
+    cmp rcx, r14
+    jge .softplus_fwd_done
+    movss xmm0, [rsi + rcx*4]
+    cvtss2sd xmm0, xmm0
+    
+    sub rsp, 16
+    mov [rsp], rcx
+    call exp wrt ..plt
+    mov rcx, [rsp]
+    add rsp, 16
+    
+    movsd xmm1, [rel one_f64]
+    addsd xmm0, xmm1
+    
+    sub rsp, 16
+    mov [rsp], rcx
+    call log wrt ..plt
+    mov rcx, [rsp]
+    add rsp, 16
+    
+    cvtsd2ss xmm0, xmm0
+    movss [rdi + rcx*4], xmm0
+    inc rcx
+    jmp .softplus_fwd_f32_loop
+
+.softplus_fwd_done:
+    add rsp, 8
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; node_softplus - Softplus activation with autograd
+; Arguments:
+;   RDI = Node* x
+; Returns:
+;   RAX = Node* out
+; =============================================================================
+node_softplus:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 24
+    
+    mov r12, rdi                    ; input node
+    
+    ; Create output tensor
+    mov rax, [r12 + NODE_VALUE]
+    mov rdi, [rax + TENSOR_NDIM]
+    mov rsi, [rax + TENSOR_SHAPE]
+    mov edx, [rax + TENSOR_DTYPE]
+    call tensor_create
+    test rax, rax
+    jz .softplus_node_alloc_failed
+    mov r13, rax                    ; output tensor
+    
+    ; Compute Softplus
+    mov rdi, r13
+    mov rsi, [r12 + NODE_VALUE]
+    call softplus_forward
+    
+    ; Create node
+    mov rdi, r13
+    mov rsi, 1
+    call node_create
+    test rax, rax
+    jz .softplus_node_alloc_failed
+    mov rbx, rax
+    
+    ; Set backward function
+    lea rax, [rel softplus_backward]
+    mov [rbx + NODE_BACKWARD_FN], rax
+    
+    ; Set parent
+    mov dword [rbx + NODE_N_PARENTS], 1
+    mov rdi, 8
+    call mem_alloc
+    mov [rbx + NODE_PARENTS], rax
+    mov [rel rax], r12
+    
+    mov rax, rbx
+    
+    add rsp, 24
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.softplus_node_alloc_failed:
+    xor eax, eax
+    add rsp, 24
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; softplus_backward - Backward for Softplus
+; dSoftplus/dx = sigmoid(x) = 1 / (1 + exp(-x))
+; =============================================================================
+softplus_backward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 24
+    
+    mov r12, rdi                    ; self
+    mov r13, [r12 + NODE_GRAD]      ; dL/dout
+    mov r14, [r12 + NODE_PARENTS]
+    mov r15, [rel r14]              ; parent x
+    
+    mov rax, [r15 + NODE_GRAD]
+    test rax, rax
+    jz .softplus_bwd_done
+    
+    mov rbx, rax                    ; parent grad tensor
+    
+    mov rdi, [rbx + TENSOR_DATA]    ; grad_x
+    mov rsi, [r13 + TENSOR_DATA]    ; dL/dout
+    mov rdx, [r15 + NODE_VALUE]
+    mov rdx, [rdx + TENSOR_DATA]    ; x
+    
+    mov [rsp], rdi
+    mov [rsp+8], rsi
+    mov [rsp+16], rdx
+    
+    push rbx
+    mov rdi, rbx
+    call tensor_numel
+    mov rcx, rax
+    pop rbx
+    
+    mov rdi, [rsp]
+    mov rsi, [rsp+8]
+    mov rdx, [rsp+16]
+    
+    mov eax, [rbx + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .softplus_bwd_f32
+    
+    ; float64
+    xor r8, r8
+.softplus_bwd_f64_loop:
+    cmp r8, rcx
+    jge .softplus_bwd_done
+    
+    movsd xmm0, [rdx + r8*8]        ; x
+    movsd xmm2, [rsi + r8*8]        ; dL/dout
+    
+    ; sigmoid(x) = 1 / (1 + exp(-x))
+    xorpd xmm1, xmm1
+    subsd xmm1, xmm0                ; -x
+    
+    sub rsp, 32
+    mov [rsp], r8
+    mov [rsp+8], rcx
+    movsd [rsp+16], xmm2
+    movsd xmm0, xmm1
+    call exp wrt ..plt
+    mov r8, [rsp]
+    mov rcx, [rsp+8]
+    movsd xmm2, [rsp+16]
+    add rsp, 32
+    
+    movsd xmm1, [rel one_f64]
+    addsd xmm0, xmm1                ; 1 + exp(-x)
+    divsd xmm1, xmm0                ; sigmoid = 1 / (1 + exp(-x))
+    
+    mulsd xmm2, xmm1                ; dL/dout * sigmoid
+    addsd xmm2, [rdi + r8*8]
+    movsd [rdi + r8*8], xmm2
+    
+    inc r8
+    jmp .softplus_bwd_f64_loop
+
+.softplus_bwd_f32:
+    xor r8, r8
+.softplus_bwd_f32_loop:
+    cmp r8, rcx
+    jge .softplus_bwd_done
+    
+    movss xmm0, [rdx + r8*4]
+    cvtss2sd xmm0, xmm0
+    movss xmm2, [rsi + r8*4]
+    cvtss2sd xmm2, xmm2
+    
+    xorpd xmm1, xmm1
+    subsd xmm1, xmm0
+    
+    sub rsp, 32
+    mov [rsp], r8
+    mov [rsp+8], rcx
+    movsd [rsp+16], xmm2
+    movsd xmm0, xmm1
+    call exp wrt ..plt
+    mov r8, [rsp]
+    mov rcx, [rsp+8]
+    movsd xmm2, [rsp+16]
+    add rsp, 32
+    
+    movsd xmm1, [rel one_f64]
+    addsd xmm0, xmm1
+    divsd xmm1, xmm0
+    
+    mulsd xmm2, xmm1
+    cvtsd2ss xmm2, xmm2
+    addss xmm2, [rdi + r8*4]
+    movss [rdi + r8*4], xmm2
+    
+    inc r8
+    jmp .softplus_bwd_f32_loop
+
+.softplus_bwd_done:
+    add rsp, 24
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; HARDTANH Activation
+; Hardtanh(x) = -1 if x < -1, 1 if x > 1, else x
+; A piecewise linear approximation of tanh with min/max bounds
+; =============================================================================
+
+; =============================================================================
+; hardtanh_forward - Hardtanh forward pass (tensor-only, no autograd)
+; Arguments:
+;   RDI = Tensor* out
+;   RSI = Tensor* x
+; =============================================================================
+hardtanh_forward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 8
+    
+    mov r12, rdi                    ; out
+    mov r13, rsi                    ; x
+    
+    mov rdi, r13
+    call tensor_numel
+    mov r14, rax
+    
+    mov rdi, [r12 + TENSOR_DATA]
+    mov rsi, [r13 + TENSOR_DATA]
+    
+    mov eax, [r12 + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .hardtanh_fwd_f32
+    
+    ; float64
+    movsd xmm4, [rel one_f64]       ; 1.0
+    xorpd xmm5, xmm5
+    subsd xmm5, xmm4                ; -1.0
+    
+    xor rcx, rcx
+.hardtanh_fwd_f64_loop:
+    cmp rcx, r14
+    jge .hardtanh_fwd_done
+    movsd xmm0, [rsi + rcx*8]       ; x
+    
+    ; Check if x < -1
+    comisd xmm0, xmm5
+    jb .hardtanh_fwd_f64_min
+    
+    ; Check if x > 1
+    comisd xmm0, xmm4
+    ja .hardtanh_fwd_f64_max
+    
+    ; Middle: keep x as is
+    movsd [rdi + rcx*8], xmm0
+    jmp .hardtanh_fwd_f64_next
+
+.hardtanh_fwd_f64_min:
+    movsd [rdi + rcx*8], xmm5
+    jmp .hardtanh_fwd_f64_next
+
+.hardtanh_fwd_f64_max:
+    movsd [rdi + rcx*8], xmm4
+    
+.hardtanh_fwd_f64_next:
+    inc rcx
+    jmp .hardtanh_fwd_f64_loop
+
+.hardtanh_fwd_f32:
+    movsd xmm4, [rel one_f64]
+    xorpd xmm5, xmm5
+    subsd xmm5, xmm4                ; -1.0
+    
+    xor rcx, rcx
+.hardtanh_fwd_f32_loop:
+    cmp rcx, r14
+    jge .hardtanh_fwd_done
+    movss xmm0, [rsi + rcx*4]
+    cvtss2sd xmm0, xmm0
+    
+    comisd xmm0, xmm5
+    jb .hardtanh_fwd_f32_min
+    
+    comisd xmm0, xmm4
+    ja .hardtanh_fwd_f32_max
+    
+    cvtsd2ss xmm0, xmm0
+    movss [rdi + rcx*4], xmm0
+    jmp .hardtanh_fwd_f32_next
+
+.hardtanh_fwd_f32_min:
+    cvtsd2ss xmm1, xmm5
+    movss [rdi + rcx*4], xmm1
+    jmp .hardtanh_fwd_f32_next
+
+.hardtanh_fwd_f32_max:
+    cvtsd2ss xmm1, xmm4
+    movss [rdi + rcx*4], xmm1
+    
+.hardtanh_fwd_f32_next:
+    inc rcx
+    jmp .hardtanh_fwd_f32_loop
+
+.hardtanh_fwd_done:
+    add rsp, 8
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; node_hardtanh - Hardtanh activation with autograd
+; Arguments:
+;   RDI = Node* x
+; Returns:
+;   RAX = Node* out
+; =============================================================================
+node_hardtanh:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 24
+    
+    mov r12, rdi                    ; input node
+    
+    ; Create output tensor
+    mov rax, [r12 + NODE_VALUE]
+    mov rdi, [rax + TENSOR_NDIM]
+    mov rsi, [rax + TENSOR_SHAPE]
+    mov edx, [rax + TENSOR_DTYPE]
+    call tensor_create
+    test rax, rax
+    jz .hardtanh_node_alloc_failed
+    mov r13, rax                    ; output tensor
+    
+    ; Compute Hardtanh
+    mov rdi, r13
+    mov rsi, [r12 + NODE_VALUE]
+    call hardtanh_forward
+    
+    ; Create node
+    mov rdi, r13
+    mov rsi, 1
+    call node_create
+    test rax, rax
+    jz .hardtanh_node_alloc_failed
+    mov rbx, rax
+    
+    ; Set backward function
+    lea rax, [rel hardtanh_backward]
+    mov [rbx + NODE_BACKWARD_FN], rax
+    
+    ; Set parent
+    mov dword [rbx + NODE_N_PARENTS], 1
+    mov rdi, 8
+    call mem_alloc
+    mov [rbx + NODE_PARENTS], rax
+    mov [rel rax], r12
+    
+    mov rax, rbx
+    
+    add rsp, 24
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.hardtanh_node_alloc_failed:
+    xor eax, eax
+    add rsp, 24
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; hardtanh_backward - Backward for Hardtanh
+; dHardtanh/dx = 1 if -1 <= x <= 1, else 0
+; =============================================================================
+hardtanh_backward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 24
+    
+    mov r12, rdi                    ; self
+    mov r13, [r12 + NODE_GRAD]      ; dL/dout
+    mov r14, [r12 + NODE_PARENTS]
+    mov r15, [rel r14]              ; parent x
+    
+    mov rax, [r15 + NODE_GRAD]
+    test rax, rax
+    jz .hardtanh_bwd_done
+    
+    mov rbx, rax                    ; parent grad tensor
+    
+    mov rdi, [rbx + TENSOR_DATA]    ; grad_x
+    mov rsi, [r13 + TENSOR_DATA]    ; dL/dout
+    mov rdx, [r15 + NODE_VALUE]
+    mov rdx, [rdx + TENSOR_DATA]    ; x
+    
+    mov [rsp], rdi
+    mov [rsp+8], rsi
+    mov [rsp+16], rdx
+    
+    push rbx
+    mov rdi, rbx
+    call tensor_numel
+    mov rcx, rax
+    pop rbx
+    
+    mov rdi, [rsp]
+    mov rsi, [rsp+8]
+    mov rdx, [rsp+16]
+    
+    mov eax, [rbx + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .hardtanh_bwd_f32
+    
+    ; float64
+    movsd xmm4, [rel one_f64]       ; 1.0
+    xorpd xmm5, xmm5
+    subsd xmm5, xmm4                ; -1.0
+    
+    xor r8, r8
+.hardtanh_bwd_f64_loop:
+    cmp r8, rcx
+    jge .hardtanh_bwd_done
+    
+    movsd xmm0, [rdx + r8*8]        ; x
+    movsd xmm2, [rsi + r8*8]        ; dL/dout
+    
+    ; Check if x < -1 or x > 1
+    comisd xmm0, xmm5
+    jb .hardtanh_bwd_f64_zero
+    comisd xmm0, xmm4
+    ja .hardtanh_bwd_f64_zero
+    
+    ; -1 <= x <= 1: pass gradient through
+    addsd xmm2, [rdi + r8*8]
+    movsd [rdi + r8*8], xmm2
+    jmp .hardtanh_bwd_f64_next
+
+.hardtanh_bwd_f64_zero:
+    ; x outside [-1, 1]: gradient is 0
+    
+.hardtanh_bwd_f64_next:
+    inc r8
+    jmp .hardtanh_bwd_f64_loop
+
+.hardtanh_bwd_f32:
+    movsd xmm4, [rel one_f64]
+    xorpd xmm5, xmm5
+    subsd xmm5, xmm4
+    
+    xor r8, r8
+.hardtanh_bwd_f32_loop:
+    cmp r8, rcx
+    jge .hardtanh_bwd_done
+    
+    movss xmm0, [rdx + r8*4]
+    cvtss2sd xmm0, xmm0
+    movss xmm2, [rsi + r8*4]
+    cvtss2sd xmm2, xmm2
+    
+    comisd xmm0, xmm5
+    jb .hardtanh_bwd_f32_zero
+    comisd xmm0, xmm4
+    ja .hardtanh_bwd_f32_zero
+    
+    cvtsd2ss xmm2, xmm2
+    addss xmm2, [rdi + r8*4]
+    movss [rdi + r8*4], xmm2
+    jmp .hardtanh_bwd_f32_next
+
+.hardtanh_bwd_f32_zero:
+    ; zero gradient
+
+.hardtanh_bwd_f32_next:
+    inc r8
+    jmp .hardtanh_bwd_f32_loop
+
+.hardtanh_bwd_done:
+    add rsp, 24
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
 ; Mark stack as non-executable
 section .note.GNU-stack noalloc noexec nowrite progbits
