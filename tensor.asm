@@ -48,6 +48,10 @@ section .bss
 
 section .text
 
+; Error code constants (from error.asm)
+ERR_INVALID_DTYPE       equ 12
+ERR_SHAPE_MISMATCH      equ 4
+
 ; External functions
 extern mem_alloc
 extern mem_alloc_aligned
@@ -56,6 +60,7 @@ extern mem_zero
 extern mem_copy
 extern panic
 extern assert_true
+extern error_set
 
 ; Export tensor functions
 global tensor_create
@@ -337,8 +342,21 @@ tensor_create:
     ret
 
 .invalid_dtype:
-    lea rdi, [rel err_invalid_dtype]
-    call panic
+    ; Set error code and return NULL instead of panic
+    mov edi, ERR_INVALID_DTYPE
+    xor esi, esi
+    xor edx, edx
+    xor ecx, ecx
+    call error_set
+    xor eax, eax
+    add rsp, 24
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
 
 .alloc_failed:
     xor eax, eax
@@ -634,8 +652,21 @@ tensor_reshape:
     ret
 
 .shape_mismatch:
-    lea rdi, [rel err_shape_mismatch]
-    call panic
+    ; Set error code and return NULL instead of panic
+    mov edi, ERR_SHAPE_MISMATCH
+    xor esi, esi
+    xor edx, edx
+    xor ecx, ecx
+    call error_set
+    xor eax, eax
+    add rsp, 8
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
 
 .null_tensor:
     xor eax, eax

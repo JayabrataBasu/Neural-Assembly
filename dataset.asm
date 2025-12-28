@@ -78,6 +78,10 @@ extern print_string
 extern print_int
 extern print_float
 extern rand_range
+extern error_set
+
+; Error code constants (from error.asm)
+ERR_FILE_NOT_FOUND      equ 6
 
 ; Export dataset functions
 global dataset_create
@@ -406,8 +410,21 @@ dataset_load_csv:
     jmp .no_labels
 
 .file_error:
-    lea rdi, [rel err_file_open]
-    call panic
+    ; Set error code and return NULL instead of panic
+    mov edi, ERR_FILE_NOT_FOUND
+    xor esi, esi
+    xor edx, edx
+    xor ecx, ecx
+    call error_set
+    xor eax, eax
+    add rsp, 88
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
 
 .alloc_failed:
     xor eax, eax

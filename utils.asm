@@ -33,10 +33,14 @@ extern strtod
 extern printf
 extern fprintf
 extern stderr
+extern error_set
 
 ; Import from mem.asm
 extern mem_alloc
 extern mem_free
+
+; Error code constants (from error.asm)
+ERR_INTERNAL            equ 15
 
 ; Export our functions
 global panic
@@ -44,6 +48,7 @@ global log_info
 global log_int
 global log_float
 global assert_true
+global assert_true_safe
 global str_cmp
 global str_len
 global str_copy
@@ -191,6 +196,37 @@ assert_true:
 .assertion_failed:
     mov rdi, rsi            ; Error message
     call panic              ; Does not return
+
+; =============================================================================
+; assert_true_safe - FFI-safe assert that returns error code instead of panic
+; Arguments:
+;   RDI = condition (0 = false, non-zero = true)
+;   RSI = error code to return if assertion fails
+; Returns:
+;   RAX = 0 on success, error code on failure
+; =============================================================================
+assert_true_safe:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .safe_failed
+    
+    xor eax, eax            ; Success
+    pop rbp
+    ret
+
+.safe_failed:
+    mov eax, esi            ; Return the error code
+    mov edi, esi            ; Set error state
+    xor esi, esi
+    xor edx, edx
+    xor ecx, ecx
+    push rax
+    call error_set
+    pop rax
+    pop rbp
+    ret
 
 ; =============================================================================
 ; str_cmp - Compare two strings

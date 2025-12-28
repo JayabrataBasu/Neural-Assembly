@@ -77,6 +77,8 @@ extern relu_forward
 extern sigmoid_forward
 extern softmax_forward
 extern tanh_forward
+extern gelu_forward
+extern leaky_relu_forward
 
 ; Note: linear_free, optimizer_step, dataset_size may not exist in all implementations
 extern linear_create
@@ -132,12 +134,16 @@ global neural_tensor_free
 global neural_tensor_data
 global neural_tensor_ndim
 global neural_tensor_shape
+global neural_tensor_stride
 global neural_tensor_numel
 global neural_tensor_dtype
 global neural_tensor_bytes
 global neural_tensor_fill
 global neural_tensor_copy
 global neural_tensor_reshape
+global neural_tensor_is_contiguous
+global neural_tensor_make_contiguous
+global neural_buffer_info
 global neural_add
 global neural_sub
 global neural_mul
@@ -149,6 +155,8 @@ global neural_relu
 global neural_sigmoid
 global neural_tanh
 global neural_softmax
+global neural_gelu
+global neural_leaky_relu
 global neural_linear_create
 global neural_linear_free
 global neural_linear_forward
@@ -473,6 +481,20 @@ neural_tensor_shape:
     ret
 
 ; =============================================================================
+; neural_tensor_stride - Get stride pointer (in bytes)
+; Arguments: NeuralTensor* tensor
+; Returns: const int64_t*
+; =============================================================================
+neural_tensor_stride:
+    test rdi, rdi
+    jz .null
+    mov rax, [rdi + TENSOR_STRIDE]
+    ret
+.null:
+    xor eax, eax
+    ret
+
+; =============================================================================
 ; neural_tensor_numel - Get total number of elements
 ; Arguments: NeuralTensor* tensor
 ; Returns: uint64_t
@@ -556,6 +578,215 @@ neural_tensor_fill:
     mov [rel last_error], eax
 
 .done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_tensor_is_contiguous - Check if tensor is C-contiguous (row-major)
+; Arguments: NeuralTensor* tensor
+; Returns: int (1 if contiguous, 0 if not, -1 on error)
+; =============================================================================
+neural_tensor_is_contiguous:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    
+    test rdi, rdi
+    jz .is_contig_null
+    
+    mov r12, rdi                    ; tensor
+    mov r13, [rdi + TENSOR_NDIM]    ; ndim
+    
+    ; Scalar or 0-d tensor is contiguous
+    test r13, r13
+    jz .is_contig_yes
+    
+    ; Get dtype size
+    mov eax, [r12 + TENSOR_DTYPE]
+    cmp eax, 0
+    je .is_contig_f32
+    mov rbx, 8                      ; float64
+    jmp .is_contig_check
+.is_contig_f32:
+    mov rbx, 4                      ; float32
+
+.is_contig_check:
+    ; Check stride[ndim-1] == element_size
+    mov rax, [r12 + TENSOR_STRIDE]
+    mov rcx, r13
+    dec rcx
+    cmp [rax + rcx*8], rbx
+    jne .is_contig_no
+    
+    ; Check each stride[i] == stride[i+1] * shape[i+1]
+    test rcx, rcx
+    jz .is_contig_yes               ; only 1 dim
+
+.is_contig_loop:
+    dec rcx
+    js .is_contig_yes
+    
+    mov rax, [r12 + TENSOR_STRIDE]
+    mov rdx, [r12 + TENSOR_SHAPE]
+    
+    mov rsi, [rax + rcx*8 + 8]      ; stride[i+1]
+    imul rsi, [rdx + rcx*8 + 8]     ; * shape[i+1]
+    cmp [rax + rcx*8], rsi          ; stride[i]
+    jne .is_contig_no
+    jmp .is_contig_loop
+
+.is_contig_yes:
+    mov eax, 1
+    jmp .is_contig_done
+
+.is_contig_no:
+    xor eax, eax
+    jmp .is_contig_done
+
+.is_contig_null:
+    mov eax, -1
+
+.is_contig_done:
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_tensor_make_contiguous - Return contiguous copy if needed
+; Arguments: NeuralTensor* tensor
+; Returns: NeuralTensor* (may be same tensor if already contiguous, or new copy)
+; =============================================================================
+neural_tensor_make_contiguous:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    sub rsp, 8
+    
+    test rdi, rdi
+    jz .make_contig_null
+    
+    mov r12, rdi
+    
+    ; Check if already contiguous
+    call neural_tensor_is_contiguous
+    cmp eax, 1
+    je .make_contig_same
+    
+    ; Create contiguous copy
+    mov rdi, [r12 + TENSOR_NDIM]
+    mov rsi, [r12 + TENSOR_SHAPE]
+    mov edx, [r12 + TENSOR_DTYPE]
+    call tensor_create
+    test rax, rax
+    jz .make_contig_alloc_fail
+    mov rbx, rax
+    
+    ; Copy data (handles non-contiguous source)
+    mov rdi, rbx
+    mov rsi, r12
+    call tensor_copy
+    
+    mov rax, rbx
+    jmp .make_contig_done
+
+.make_contig_same:
+    mov rax, r12
+    jmp .make_contig_done
+
+.make_contig_null:
+    mov dword [rel last_error], NEURAL_ERR_NULL_POINTER
+    xor eax, eax
+    jmp .make_contig_done
+
+.make_contig_alloc_fail:
+    mov dword [rel last_error], NEURAL_ERR_OUT_OF_MEMORY
+    xor eax, eax
+
+.make_contig_done:
+    add rsp, 8
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_buffer_info - Get buffer protocol info for NumPy integration
+; Arguments:
+;   RDI = NeuralTensor* tensor
+;   RSI = NeuralBufferInfo* info (output struct to fill)
+; Returns: int (error code)
+; 
+; NeuralBufferInfo struct layout:
+;   void* data          (offset 0)
+;   uint64_t itemsize   (offset 8)
+;   uint64_t ndim       (offset 16)
+;   uint64_t* shape     (offset 24)
+;   int64_t* strides    (offset 32)
+;   int readonly        (offset 40)
+;   char format[8]      (offset 44)
+; =============================================================================
+neural_buffer_info:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    
+    test rdi, rdi
+    jz .bufinfo_null
+    test rsi, rsi
+    jz .bufinfo_null
+    
+    mov r12, rdi            ; tensor
+    mov rbx, rsi            ; info struct
+    
+    ; data pointer
+    mov rax, [r12 + TENSOR_DATA]
+    mov [rbx], rax
+    
+    ; itemsize (element size)
+    mov eax, [r12 + TENSOR_DTYPE]
+    cmp eax, 0
+    je .bufinfo_f32
+    mov qword [rbx + 8], 8          ; float64
+    mov byte [rbx + 44], 'd'        ; format 'd' for double
+    jmp .bufinfo_cont
+.bufinfo_f32:
+    mov qword [rbx + 8], 4          ; float32
+    mov byte [rbx + 44], 'f'        ; format 'f' for float
+.bufinfo_cont:
+    mov byte [rbx + 45], 0          ; null terminate format
+    
+    ; ndim
+    mov rax, [r12 + TENSOR_NDIM]
+    mov [rbx + 16], rax
+    
+    ; shape pointer
+    mov rax, [r12 + TENSOR_SHAPE]
+    mov [rbx + 24], rax
+    
+    ; strides pointer
+    mov rax, [r12 + TENSOR_STRIDE]
+    mov [rbx + 32], rax
+    
+    ; readonly flag (0 = writable)
+    mov dword [rbx + 40], 0
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .bufinfo_done
+
+.bufinfo_null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.bufinfo_done:
+    pop r12
+    pop rbx
     pop rbp
     ret
 
@@ -913,6 +1144,67 @@ neural_softmax:
     ret
 
 ; =============================================================================
+; neural_gelu - GELU activation
+; Arguments:
+;   RDI = NeuralTensor* out
+;   RSI = const NeuralTensor* x
+; Returns: int (error code)
+; =============================================================================
+neural_gelu:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .gelu_api_null
+    test rsi, rsi
+    jz .gelu_api_null
+    
+    call gelu_forward
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .gelu_api_done
+
+.gelu_api_null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.gelu_api_done:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_leaky_relu - Leaky ReLU activation
+; Arguments:
+;   RDI = NeuralTensor* out
+;   RSI = const NeuralTensor* x
+;   XMM0 = double alpha (negative slope, e.g. 0.01)
+; Returns: int (error code)
+; =============================================================================
+neural_leaky_relu:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .leaky_api_null
+    test rsi, rsi
+    jz .leaky_api_null
+    
+    call leaky_relu_forward
+    
+    xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .leaky_api_done
+
+.leaky_api_null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.leaky_api_done:
+    pop rbp
+    ret
+
+; =============================================================================
 ; neural_linear_create - Create linear layer
 ; Arguments:
 ;   RDI = uint64_t in_features
@@ -1223,16 +1515,234 @@ neural_tensor_random:
     xor eax, eax
     ret
 
+; =============================================================================
+; neural_tensor_from_data - Create tensor by copying data from buffer
+; Arguments:
+;   RDI = void* data (source buffer to copy from)
+;   RSI = const uint64_t* shape
+;   RDX = uint64_t ndim
+;   ECX = int dtype
+; Returns: NeuralTensor* (NULL on error)
+; =============================================================================
 neural_tensor_from_data:
-    ; TODO: Implement tensor from data
-    mov dword [rel last_error], NEURAL_ERR_NOT_IMPLEMENTED
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 8
+    
+    ; Validate arguments
+    test rdi, rdi
+    jz .from_data_null
+    test rsi, rsi
+    jz .from_data_null
+    
+    mov r12, rdi            ; source data
+    mov r13, rsi            ; shape
+    mov r14, rdx            ; ndim
+    mov r15d, ecx           ; dtype
+    
+    ; Create tensor with given shape
+    mov rdi, r14            ; ndim
+    mov rsi, r13            ; shape
+    mov edx, r15d           ; dtype
+    call tensor_create
+    test rax, rax
+    jz .from_data_alloc_fail
+    mov rbx, rax            ; tensor
+    
+    ; Calculate bytes to copy
+    mov rdi, rbx
+    call tensor_numel
+    mov rcx, rax            ; numel
+    
+    ; Determine element size
+    cmp r15d, 0             ; DT_FLOAT32
+    je .from_data_f32
+    mov rax, 8              ; DT_FLOAT64
+    jmp .from_data_copy
+.from_data_f32:
+    mov rax, 4
+.from_data_copy:
+    imul rcx, rax           ; total bytes
+    
+    ; Copy data
+    mov rdi, [rbx + TENSOR_DATA]
+    mov rsi, r12            ; source
+    mov rdx, rcx            ; bytes
+    call mem_copy
+    
+    mov dword [rel last_error], NEURAL_OK
+    mov rax, rbx
+    jmp .from_data_done
+
+.from_data_null:
+    mov dword [rel last_error], NEURAL_ERR_NULL_POINTER
     xor eax, eax
+    jmp .from_data_done
+
+.from_data_alloc_fail:
+    mov dword [rel last_error], NEURAL_ERR_OUT_OF_MEMORY
+    xor eax, eax
+
+.from_data_done:
+    add rsp, 8
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
     ret
 
+; =============================================================================
+; neural_tensor_from_buffer - Create tensor wrapping external buffer (zero-copy)
+; This creates a tensor that directly uses the provided buffer without copying.
+; The caller is responsible for keeping the buffer alive while the tensor exists.
+; Arguments:
+;   RDI = void* buffer (external buffer to wrap - must remain valid)
+;   RSI = const uint64_t* shape
+;   RDX = uint64_t ndim
+;   ECX = int dtype
+;   R8  = const int64_t* strides (bytes, or NULL for C-contiguous)
+; Returns: NeuralTensor* (NULL on error)
+; =============================================================================
 neural_tensor_from_buffer:
-    ; TODO: Implement zero-copy tensor
-    mov dword [rel last_error], NEURAL_ERR_NOT_IMPLEMENTED
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 24
+    
+    ; Validate arguments
+    test rdi, rdi
+    jz .from_buf_null
+    test rsi, rsi
+    jz .from_buf_null
+    
+    mov r12, rdi            ; buffer
+    mov r13, rsi            ; shape
+    mov r14, rdx            ; ndim
+    mov r15d, ecx           ; dtype
+    mov [rsp], r8           ; strides (or NULL)
+    
+    ; Allocate tensor struct
+    mov rdi, 64             ; TENSOR_SIZE
+    mov rsi, 16
+    call mem_alloc_aligned
+    test rax, rax
+    jz .from_buf_alloc_fail
+    mov rbx, rax
+    
+    ; Set data pointer directly (zero-copy)
+    mov [rbx + TENSOR_DATA], r12
+    
+    ; Set ndim and dtype
+    mov [rbx + TENSOR_NDIM], r14
+    mov [rbx + TENSOR_DTYPE], r15d
+    
+    ; Allocate and copy shape
+    lea rdi, [r14*8]
+    mov rsi, 8
+    call mem_alloc_aligned
+    test rax, rax
+    jz .from_buf_cleanup1
+    mov [rbx + TENSOR_SHAPE], rax
+    
+    ; Copy shape values
+    mov rdi, rax
+    mov rsi, r13
+    lea rdx, [r14*8]
+    call mem_copy
+    
+    ; Allocate stride array
+    lea rdi, [r14*8]
+    mov rsi, 8
+    call mem_alloc_aligned
+    test rax, rax
+    jz .from_buf_cleanup2
+    mov [rbx + TENSOR_STRIDE], rax
+    mov r8, rax             ; stride ptr
+    
+    ; Check if custom strides provided
+    mov rcx, [rsp]          ; original strides arg
+    test rcx, rcx
+    jnz .from_buf_custom_stride
+    
+    ; Compute C-contiguous strides (row-major)
+    ; Element size first
+    cmp r15d, 0
+    je .from_buf_stride_f32
+    mov rax, 8
+    jmp .from_buf_compute_stride
+.from_buf_stride_f32:
+    mov rax, 4
+.from_buf_compute_stride:
+    ; stride[ndim-1] = element_size
+    mov rcx, r14
+    dec rcx
+    mov [r8 + rcx*8], rax
+    
+    test rcx, rcx
+    jz .from_buf_stride_done
+    
+.from_buf_stride_loop:
+    dec rcx
+    js .from_buf_stride_done
+    mov rax, [r8 + rcx*8 + 8]       ; stride[i+1]
+    mov rdx, [rbx + TENSOR_SHAPE]
+    imul rax, [rdx + rcx*8 + 8]     ; * shape[i+1]
+    mov [r8 + rcx*8], rax
+    jmp .from_buf_stride_loop
+
+.from_buf_custom_stride:
+    ; Copy provided strides (already in bytes)
+    mov rdi, r8
+    mov rsi, [rsp]
+    lea rdx, [r14*8]
+    call mem_copy
+
+.from_buf_stride_done:
+    ; Set flags to mark this as external buffer (don't free data on tensor_free)
+    mov dword [rbx + TENSOR_FLAGS], 1   ; TENSOR_FLAG_EXTERNAL_BUFFER
+    
+    mov dword [rel last_error], NEURAL_OK
+    mov rax, rbx
+    jmp .from_buf_done
+
+.from_buf_null:
+    mov dword [rel last_error], NEURAL_ERR_NULL_POINTER
     xor eax, eax
+    jmp .from_buf_done
+
+.from_buf_alloc_fail:
+    mov dword [rel last_error], NEURAL_ERR_OUT_OF_MEMORY
+    xor eax, eax
+    jmp .from_buf_done
+
+.from_buf_cleanup2:
+    mov rdi, [rbx + TENSOR_SHAPE]
+    call mem_free
+.from_buf_cleanup1:
+    mov rdi, rbx
+    call mem_free
+    mov dword [rel last_error], NEURAL_ERR_OUT_OF_MEMORY
+    xor eax, eax
+
+.from_buf_done:
+    add rsp, 24
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
     ret
 
 neural_tensor_reshape:

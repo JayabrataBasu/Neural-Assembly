@@ -166,16 +166,66 @@ NeuralTensor* neural_tensor_random(const uint64_t* shape, uint64_t ndim, int dty
 NeuralTensor* neural_tensor_from_data(const void* data, const uint64_t* shape, uint64_t ndim, int dtype);
 
 /**
- * @brief Create a tensor that shares data with a buffer (zero-copy).
- * @param data Pointer to existing data buffer
+ * @brief Create a tensor that wraps an external buffer (zero-copy).
+ * 
+ * This function creates a tensor that directly uses the provided buffer
+ * without copying data. The caller is responsible for keeping the buffer
+ * alive for the lifetime of the tensor. This is ideal for NumPy integration.
+ * 
+ * @param buffer Pointer to existing data buffer (must remain valid)
  * @param shape Array of dimension sizes
  * @param ndim Number of dimensions
- * @param dtype Data type
+ * @param dtype Data type (NEURAL_DTYPE_FLOAT32 or NEURAL_DTYPE_FLOAT64)
+ * @param strides Array of strides in bytes (or NULL for C-contiguous)
  * @return Pointer to new tensor, or NULL on error
- *
- * The caller is responsible for keeping the buffer alive.
  */
-NeuralTensor* neural_tensor_from_buffer(void* data, const uint64_t* shape, uint64_t ndim, int dtype);
+NeuralTensor* neural_tensor_from_buffer(void* buffer, const uint64_t* shape, uint64_t ndim, int dtype, const int64_t* strides);
+
+/**
+ * @brief Get the stride array of a tensor (in bytes).
+ * @param tensor Tensor to query
+ * @return Pointer to stride array, or NULL if tensor is NULL
+ */
+const int64_t* neural_tensor_stride(NeuralTensor* tensor);
+
+/**
+ * @brief Check if a tensor is C-contiguous (row-major).
+ * @param tensor Tensor to check
+ * @return 1 if contiguous, 0 if not, -1 on error
+ */
+int neural_tensor_is_contiguous(NeuralTensor* tensor);
+
+/**
+ * @brief Return a contiguous copy of the tensor if needed.
+ * @param tensor Input tensor
+ * @return Contiguous tensor (may be same as input if already contiguous), or NULL on error
+ */
+NeuralTensor* neural_tensor_make_contiguous(NeuralTensor* tensor);
+
+/**
+ * @brief Buffer info structure for NumPy buffer protocol integration.
+ */
+typedef struct {
+    void* data;             /**< Pointer to buffer data */
+    uint64_t itemsize;      /**< Size of each element in bytes */
+    uint64_t ndim;          /**< Number of dimensions */
+    const uint64_t* shape;  /**< Shape array pointer */
+    const int64_t* strides; /**< Strides array pointer (in bytes) */
+    int readonly;           /**< Whether buffer is read-only */
+    char format[8];         /**< Format string ('f' for float32, 'd' for float64) */
+} NeuralBufferInfo;
+
+/**
+ * @brief Get buffer protocol info for NumPy integration.
+ * 
+ * This function fills a NeuralBufferInfo structure with the information
+ * needed to implement Python's buffer protocol for zero-copy NumPy access.
+ * 
+ * @param tensor Tensor to get info for
+ * @param info Pointer to NeuralBufferInfo structure to fill
+ * @return NEURAL_OK on success, error code on failure
+ */
+int neural_buffer_info(NeuralTensor* tensor, NeuralBufferInfo* info);
 
 /**
  * @brief Free a tensor and its data.
@@ -350,6 +400,24 @@ int neural_tanh(NeuralTensor* out, const NeuralTensor* input);
  * @return NEURAL_OK on success, error code on failure
  */
 int neural_softmax(NeuralTensor* out, const NeuralTensor* input);
+
+/**
+ * @brief GELU activation (Gaussian Error Linear Unit)
+ * GELU(x) = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
+ * @param out Output tensor
+ * @param input Input tensor
+ * @return NEURAL_OK on success, error code on failure
+ */
+int neural_gelu(NeuralTensor* out, const NeuralTensor* input);
+
+/**
+ * @brief Leaky ReLU activation: out = max(alpha * input, input)
+ * @param out Output tensor
+ * @param input Input tensor
+ * @param alpha Negative slope (typically 0.01)
+ * @return NEURAL_OK on success, error code on failure
+ */
+int neural_leaky_relu(NeuralTensor* out, const NeuralTensor* input, double alpha);
 
 /* ============================================================================ */
 /* Neural Network Layers */

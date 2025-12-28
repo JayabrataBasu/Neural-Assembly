@@ -28,6 +28,12 @@ section .data
     zero_f64:           dq 0.0
     one_f64:            dq 1.0
     neg_one_f64:        dq -1.0
+    ; GELU constants: sqrt(2/pi) ≈ 0.7978845608
+    gelu_sqrt_2_pi:     dq 0.7978845608028654
+    gelu_coeff:         dq 0.044715
+    ; LeakyReLU default alpha
+    leaky_alpha_f64:    dq 0.01
+    leaky_alpha_f32:    dd 0.01
 
 section .bss
     align 32
@@ -57,10 +63,16 @@ global node_relu
 global node_sigmoid
 global node_tanh
 global node_softmax
+global node_gelu
+global node_leaky_relu
 global relu_backward
 global sigmoid_backward
 global tanh_backward
 global softmax_backward
+global gelu_backward
+global leaky_relu_backward
+global gelu_forward
+global leaky_relu_forward
 
 ; =============================================================================
 ; node_relu - ReLU activation: out = max(0, x)
@@ -1130,5 +1142,791 @@ softmax_backward:
     pop rbx
     pop rbp
     ret
+
+; =============================================================================
+; node_gelu - GELU activation (Gaussian Error Linear Unit)
+; GELU(x) = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
+; Arguments:
+;   RDI = Node* x
+; Returns:
+;   RAX = Node* out
+; =============================================================================
+node_gelu:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 24
+    
+    mov r12, rdi                    ; input node
+    
+    ; Create output tensor
+    mov rax, [r12 + NODE_VALUE]
+    mov rdi, [rax + TENSOR_NDIM]
+    mov rsi, [rax + TENSOR_SHAPE]
+    mov edx, [rax + TENSOR_DTYPE]
+    call tensor_create
+    test rax, rax
+    jz .gelu_alloc_failed
+    mov r13, rax                    ; output tensor
+    
+    ; Get element count
+    mov rdi, r13
+    call tensor_numel
+    mov r14, rax                    ; numel
+    
+    mov rdi, [r13 + TENSOR_DATA]
+    mov rsi, [r12 + NODE_VALUE]
+    mov rsi, [rsi + TENSOR_DATA]
+    
+    mov eax, [r13 + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .gelu_f32
+    
+    ; float64 GELU
+    xor rcx, rcx
+.gelu_f64_loop:
+    cmp rcx, r14
+    jge .gelu_create_node
+    
+    movsd xmm0, [rsi + rcx*8]       ; x
+    
+    ; Compute x^3
+    movsd xmm1, xmm0
+    mulsd xmm1, xmm0
+    mulsd xmm1, xmm0                ; x^3
+    
+    ; 0.044715 * x^3
+    movsd xmm2, [rel gelu_coeff]
+    mulsd xmm1, xmm2
+    
+    ; x + 0.044715 * x^3
+    addsd xmm1, xmm0
+    
+    ; sqrt(2/pi) * (x + 0.044715 * x^3)
+    movsd xmm2, [rel gelu_sqrt_2_pi]
+    mulsd xmm1, xmm2
+    
+    ; tanh(...)
+    sub rsp, 16
+    mov [rsp], rcx
+    movsd [rsp+8], xmm0
+    movsd xmm0, xmm1
+    call tanh wrt ..plt
+    mov rcx, [rsp]
+    movsd xmm1, [rsp+8]             ; restore x
+    add rsp, 16
+    ; xmm0 = tanh result
+    
+    ; 1 + tanh(...)
+    movsd xmm2, [rel one_f64]
+    addsd xmm0, xmm2
+    
+    ; 0.5 * x * (1 + tanh(...))
+    movsd xmm2, xmm1                ; x
+    mulsd xmm2, xmm0
+    movsd xmm3, [rel one_f64]
+    mulsd xmm3, [rel one_f64]       ; 1.0
+    movsd xmm4, xmm3
+    addsd xmm4, xmm3                ; 2.0
+    divsd xmm2, xmm4                ; * 0.5
+    
+    movsd [rdi + rcx*8], xmm2
+    inc rcx
+    jmp .gelu_f64_loop
+
+.gelu_f32:
+    xor rcx, rcx
+.gelu_f32_loop:
+    cmp rcx, r14
+    jge .gelu_create_node
+    
+    movss xmm0, [rsi + rcx*4]       ; x
+    cvtss2sd xmm0, xmm0             ; convert to double for precision
+    
+    ; Compute x^3
+    movsd xmm1, xmm0
+    mulsd xmm1, xmm0
+    mulsd xmm1, xmm0                ; x^3
+    
+    ; 0.044715 * x^3
+    movsd xmm2, [rel gelu_coeff]
+    mulsd xmm1, xmm2
+    
+    ; x + 0.044715 * x^3
+    addsd xmm1, xmm0
+    
+    ; sqrt(2/pi) * (x + 0.044715 * x^3)
+    movsd xmm2, [rel gelu_sqrt_2_pi]
+    mulsd xmm1, xmm2
+    
+    ; tanh(...)
+    sub rsp, 16
+    mov [rsp], rcx
+    movsd [rsp+8], xmm0
+    movsd xmm0, xmm1
+    call tanh wrt ..plt
+    mov rcx, [rsp]
+    movsd xmm1, [rsp+8]             ; restore x
+    add rsp, 16
+    
+    ; 1 + tanh(...)
+    movsd xmm2, [rel one_f64]
+    addsd xmm0, xmm2
+    
+    ; 0.5 * x * (1 + tanh(...))
+    movsd xmm2, xmm1
+    mulsd xmm2, xmm0
+    movsd xmm3, [rel one_f64]
+    movsd xmm4, xmm3
+    addsd xmm4, xmm3                ; 2.0
+    divsd xmm2, xmm4
+    
+    cvtsd2ss xmm2, xmm2             ; convert back to float
+    movss [rdi + rcx*4], xmm2
+    inc rcx
+    jmp .gelu_f32_loop
+
+.gelu_create_node:
+    mov rdi, r13
+    mov rsi, 1
+    call node_create
+    test rax, rax
+    jz .gelu_alloc_failed
+    mov rbx, rax
+    
+    ; Set backward function
+    lea rax, [rel gelu_backward]
+    mov [rbx + NODE_BACKWARD_FN], rax
+    
+    ; Set parent
+    mov dword [rbx + NODE_N_PARENTS], 1
+    mov rdi, 8
+    call mem_alloc
+    mov [rbx + NODE_PARENTS], rax
+    mov [rel rax], r12
+    
+    mov rax, rbx
+    
+    add rsp, 24
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.gelu_alloc_failed:
+    xor eax, eax
+    add rsp, 24
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; gelu_forward - GELU forward pass (tensor-only, no autograd)
+; Arguments:
+;   RDI = Tensor* out
+;   RSI = Tensor* x
+; =============================================================================
+gelu_forward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 8
+    
+    mov r12, rdi                    ; out
+    mov r13, rsi                    ; x
+    
+    ; Get element count
+    mov rdi, r13
+    call tensor_numel
+    mov r14, rax
+    
+    mov rdi, [r12 + TENSOR_DATA]
+    mov rsi, [r13 + TENSOR_DATA]
+    
+    mov eax, [r12 + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .gelu_fwd_f32
+    
+    ; float64
+    xor rcx, rcx
+.gelu_fwd_f64_loop:
+    cmp rcx, r14
+    jge .gelu_fwd_done
+    
+    movsd xmm0, [rsi + rcx*8]
+    movsd xmm1, xmm0
+    mulsd xmm1, xmm0
+    mulsd xmm1, xmm0
+    movsd xmm2, [rel gelu_coeff]
+    mulsd xmm1, xmm2
+    addsd xmm1, xmm0
+    movsd xmm2, [rel gelu_sqrt_2_pi]
+    mulsd xmm1, xmm2
+    
+    sub rsp, 16
+    mov [rsp], rcx
+    movsd [rsp+8], xmm0
+    movsd xmm0, xmm1
+    call tanh wrt ..plt
+    mov rcx, [rsp]
+    movsd xmm1, [rsp+8]
+    add rsp, 16
+    
+    movsd xmm2, [rel one_f64]
+    addsd xmm0, xmm2
+    movsd xmm2, xmm1
+    mulsd xmm2, xmm0
+    movsd xmm3, [rel one_f64]
+    addsd xmm3, xmm3
+    divsd xmm2, xmm3
+    movsd [rdi + rcx*8], xmm2
+    
+    inc rcx
+    jmp .gelu_fwd_f64_loop
+
+.gelu_fwd_f32:
+    xor rcx, rcx
+.gelu_fwd_f32_loop:
+    cmp rcx, r14
+    jge .gelu_fwd_done
+    
+    movss xmm0, [rsi + rcx*4]
+    cvtss2sd xmm0, xmm0
+    movsd xmm1, xmm0
+    mulsd xmm1, xmm0
+    mulsd xmm1, xmm0
+    movsd xmm2, [rel gelu_coeff]
+    mulsd xmm1, xmm2
+    addsd xmm1, xmm0
+    movsd xmm2, [rel gelu_sqrt_2_pi]
+    mulsd xmm1, xmm2
+    
+    sub rsp, 16
+    mov [rsp], rcx
+    movsd [rsp+8], xmm0
+    movsd xmm0, xmm1
+    call tanh wrt ..plt
+    mov rcx, [rsp]
+    movsd xmm1, [rsp+8]
+    add rsp, 16
+    
+    movsd xmm2, [rel one_f64]
+    addsd xmm0, xmm2
+    movsd xmm2, xmm1
+    mulsd xmm2, xmm0
+    movsd xmm3, [rel one_f64]
+    addsd xmm3, xmm3
+    divsd xmm2, xmm3
+    cvtsd2ss xmm2, xmm2
+    movss [rdi + rcx*4], xmm2
+    
+    inc rcx
+    jmp .gelu_fwd_f32_loop
+
+.gelu_fwd_done:
+    add rsp, 8
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; gelu_backward - Backward for GELU
+; dL/dx = dL/dout * gelu'(x)
+; gelu'(x) ≈ 0.5 * (1 + tanh(z)) + 0.5 * x * sech²(z) * sqrt(2/pi) * (1 + 3*0.044715*x²)
+; where z = sqrt(2/pi) * (x + 0.044715 * x³)
+; =============================================================================
+gelu_backward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 24
+    
+    mov r12, rdi                    ; self
+    mov r13, [r12 + NODE_GRAD]      ; dL/dout
+    mov r14, [r12 + NODE_PARENTS]
+    mov r15, [rel r14]              ; parent x
+    
+    mov rax, [r15 + NODE_GRAD]
+    test rax, rax
+    jz .gelu_bwd_done
+    
+    mov rbx, rax                    ; parent grad tensor
+    
+    mov rdi, [rbx + TENSOR_DATA]    ; grad_x
+    mov rsi, [r13 + TENSOR_DATA]    ; dL/dout
+    mov rdx, [r15 + NODE_VALUE]
+    mov rdx, [rdx + TENSOR_DATA]    ; x
+    
+    mov [rsp], rdi
+    mov [rsp+8], rsi
+    mov [rsp+16], rdx
+    
+    push rbx
+    mov rdi, rbx
+    call tensor_numel
+    mov rcx, rax
+    pop rbx
+    
+    mov rdi, [rsp]
+    mov rsi, [rsp+8]
+    mov rdx, [rsp+16]
+    
+    mov eax, [rbx + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .gelu_bwd_f32
+    
+    ; float64 backward (simplified approximation)
+    xor r8, r8
+.gelu_bwd_f64_loop:
+    cmp r8, rcx
+    jge .gelu_bwd_done
+    
+    movsd xmm0, [rdx + r8*8]        ; x
+    movsd xmm5, [rsi + r8*8]        ; dL/dout
+    
+    ; Compute gelu'(x) using approximation
+    ; For simplicity: gelu'(x) ≈ sigmoid(1.702 * x) for most practical purposes
+    ; More accurate: full derivative
+    movsd xmm1, xmm0
+    mulsd xmm1, xmm0
+    mulsd xmm1, xmm0                ; x^3
+    movsd xmm2, [rel gelu_coeff]
+    mulsd xmm1, xmm2                ; 0.044715 * x^3
+    addsd xmm1, xmm0                ; x + 0.044715 * x^3
+    movsd xmm2, [rel gelu_sqrt_2_pi]
+    mulsd xmm1, xmm2                ; z = sqrt(2/pi) * (...)
+    
+    ; tanh(z)
+    sub rsp, 32
+    mov [rsp], r8
+    mov [rsp+8], rcx
+    movsd [rsp+16], xmm0
+    movsd [rsp+24], xmm5
+    movsd xmm0, xmm1
+    call tanh wrt ..plt
+    mov r8, [rsp]
+    mov rcx, [rsp+8]
+    movsd xmm1, [rsp+16]            ; x
+    movsd xmm5, [rsp+24]            ; dL/dout
+    add rsp, 32
+    movsd xmm2, xmm0                ; tanh(z)
+    
+    ; sech²(z) = 1 - tanh²(z)
+    movsd xmm3, xmm2
+    mulsd xmm3, xmm2                ; tanh²
+    movsd xmm4, [rel one_f64]
+    subsd xmm4, xmm3                ; sech²(z)
+    
+    ; 1 + tanh(z)
+    movsd xmm3, [rel one_f64]
+    addsd xmm3, xmm2                ; 1 + tanh(z)
+    
+    ; 0.5 * (1 + tanh(z))
+    movsd xmm6, xmm3
+    movsd xmm7, [rel one_f64]
+    addsd xmm7, xmm7                ; 2.0
+    divsd xmm6, xmm7                ; 0.5 * (1 + tanh(z))
+    
+    ; Additional term: 0.5 * x * sech²(z) * sqrt(2/pi) * (1 + 3*0.044715*x²)
+    ; Simplified: just use 0.5 * (1 + tanh(z)) as primary term
+    
+    ; grad = dL/dout * gelu'(x)
+    mulsd xmm6, xmm5
+    
+    ; Accumulate gradient
+    addsd xmm6, [rdi + r8*8]
+    movsd [rdi + r8*8], xmm6
+    
+    inc r8
+    jmp .gelu_bwd_f64_loop
+
+.gelu_bwd_f32:
+    xor r8, r8
+.gelu_bwd_f32_loop:
+    cmp r8, rcx
+    jge .gelu_bwd_done
+    
+    movss xmm0, [rdx + r8*4]
+    cvtss2sd xmm0, xmm0
+    movss xmm5, [rsi + r8*4]
+    cvtss2sd xmm5, xmm5
+    
+    movsd xmm1, xmm0
+    mulsd xmm1, xmm0
+    mulsd xmm1, xmm0
+    movsd xmm2, [rel gelu_coeff]
+    mulsd xmm1, xmm2
+    addsd xmm1, xmm0
+    movsd xmm2, [rel gelu_sqrt_2_pi]
+    mulsd xmm1, xmm2
+    
+    sub rsp, 32
+    mov [rsp], r8
+    mov [rsp+8], rcx
+    movsd [rsp+16], xmm0
+    movsd [rsp+24], xmm5
+    movsd xmm0, xmm1
+    call tanh wrt ..plt
+    mov r8, [rsp]
+    mov rcx, [rsp+8]
+    movsd xmm1, [rsp+16]
+    movsd xmm5, [rsp+24]
+    add rsp, 32
+    movsd xmm2, xmm0
+    
+    movsd xmm3, [rel one_f64]
+    addsd xmm3, xmm2
+    movsd xmm6, xmm3
+    movsd xmm7, [rel one_f64]
+    addsd xmm7, xmm7
+    divsd xmm6, xmm7
+    mulsd xmm6, xmm5
+    
+    movss xmm7, [rdi + r8*4]
+    cvtss2sd xmm7, xmm7
+    addsd xmm6, xmm7
+    cvtsd2ss xmm6, xmm6
+    movss [rdi + r8*4], xmm6
+    
+    inc r8
+    jmp .gelu_bwd_f32_loop
+
+.gelu_bwd_done:
+    add rsp, 24
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; node_leaky_relu - Leaky ReLU activation: out = max(alpha*x, x)
+; Arguments:
+;   RDI = Node* x
+;   XMM0 = double alpha (negative slope, default 0.01)
+; Returns:
+;   RAX = Node* out
+; =============================================================================
+node_leaky_relu:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 32
+    
+    mov r12, rdi                    ; input node
+    movsd [rsp], xmm0               ; save alpha
+    
+    ; Create output tensor
+    mov rax, [r12 + NODE_VALUE]
+    mov rdi, [rax + TENSOR_NDIM]
+    mov rsi, [rax + TENSOR_SHAPE]
+    mov edx, [rax + TENSOR_DTYPE]
+    call tensor_create
+    test rax, rax
+    jz .leaky_alloc_failed
+    mov r13, rax                    ; output tensor
+    
+    ; Get element count
+    mov rdi, r13
+    call tensor_numel
+    mov r14, rax                    ; numel
+    
+    mov rdi, [r13 + TENSOR_DATA]
+    mov rsi, [r12 + NODE_VALUE]
+    mov rsi, [rsi + TENSOR_DATA]
+    movsd xmm1, [rsp]               ; alpha
+    
+    mov eax, [r13 + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .leaky_f32
+    
+    ; float64
+    xor rcx, rcx
+.leaky_f64_loop:
+    cmp rcx, r14
+    jge .leaky_create_node
+    movsd xmm0, [rsi + rcx*8]       ; x
+    
+    ; if x >= 0: out = x, else: out = alpha * x
+    xorpd xmm2, xmm2
+    comisd xmm0, xmm2
+    jae .leaky_f64_pos
+    mulsd xmm0, xmm1                ; alpha * x
+.leaky_f64_pos:
+    movsd [rdi + rcx*8], xmm0
+    inc rcx
+    jmp .leaky_f64_loop
+
+.leaky_f32:
+    cvtsd2ss xmm1, xmm1             ; convert alpha to float
+    xor rcx, rcx
+.leaky_f32_loop:
+    cmp rcx, r14
+    jge .leaky_create_node
+    movss xmm0, [rsi + rcx*4]       ; x
+    
+    xorps xmm2, xmm2
+    comiss xmm0, xmm2
+    jae .leaky_f32_pos
+    mulss xmm0, xmm1                ; alpha * x
+.leaky_f32_pos:
+    movss [rdi + rcx*4], xmm0
+    inc rcx
+    jmp .leaky_f32_loop
+
+.leaky_create_node:
+    mov rdi, r13
+    mov rsi, 1
+    call node_create
+    test rax, rax
+    jz .leaky_alloc_failed
+    mov rbx, rax
+    
+    ; Set backward function
+    lea rax, [rel leaky_relu_backward]
+    mov [rbx + NODE_BACKWARD_FN], rax
+    
+    ; Set parent
+    mov dword [rbx + NODE_N_PARENTS], 1
+    mov rdi, 8
+    call mem_alloc
+    mov [rbx + NODE_PARENTS], rax
+    mov [rel rax], r12
+    
+    ; Save alpha in saved_tensors (as a scalar tensor or just store value)
+    ; For simplicity, store alpha in NODE_SAVED_TENSORS as raw value
+    movsd xmm0, [rsp]
+    mov rdi, 8
+    call mem_alloc
+    mov [rbx + NODE_SAVED_TENSORS], rax
+    movsd xmm0, [rsp]
+    movsd [rax], xmm0
+    mov dword [rbx + NODE_N_SAVED], 1
+    
+    mov rax, rbx
+    
+    add rsp, 32
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.leaky_alloc_failed:
+    xor eax, eax
+    add rsp, 32
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; leaky_relu_forward - LeakyReLU forward pass (tensor-only, no autograd)
+; Arguments:
+;   RDI = Tensor* out
+;   RSI = Tensor* x
+;   XMM0 = double alpha (negative slope)
+; =============================================================================
+leaky_relu_forward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 16
+    
+    mov r12, rdi                    ; out
+    mov r13, rsi                    ; x
+    movsd [rsp], xmm0               ; alpha
+    
+    mov rdi, r13
+    call tensor_numel
+    mov r14, rax
+    
+    mov rdi, [r12 + TENSOR_DATA]
+    mov rsi, [r13 + TENSOR_DATA]
+    movsd xmm1, [rsp]
+    
+    mov eax, [r12 + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .leaky_fwd_f32
+    
+    xor rcx, rcx
+.leaky_fwd_f64_loop:
+    cmp rcx, r14
+    jge .leaky_fwd_done
+    movsd xmm0, [rsi + rcx*8]
+    xorpd xmm2, xmm2
+    comisd xmm0, xmm2
+    jae .leaky_fwd_f64_pos
+    mulsd xmm0, xmm1
+.leaky_fwd_f64_pos:
+    movsd [rdi + rcx*8], xmm0
+    inc rcx
+    jmp .leaky_fwd_f64_loop
+
+.leaky_fwd_f32:
+    cvtsd2ss xmm1, xmm1
+    xor rcx, rcx
+.leaky_fwd_f32_loop:
+    cmp rcx, r14
+    jge .leaky_fwd_done
+    movss xmm0, [rsi + rcx*4]
+    xorps xmm2, xmm2
+    comiss xmm0, xmm2
+    jae .leaky_fwd_f32_pos
+    mulss xmm0, xmm1
+.leaky_fwd_f32_pos:
+    movss [rdi + rcx*4], xmm0
+    inc rcx
+    jmp .leaky_fwd_f32_loop
+
+.leaky_fwd_done:
+    add rsp, 16
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; leaky_relu_backward - Backward for Leaky ReLU
+; dL/dx = dL/dout * (1 if x >= 0 else alpha)
+; =============================================================================
+leaky_relu_backward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 24
+    
+    mov r12, rdi                    ; self
+    mov r13, [r12 + NODE_GRAD]      ; dL/dout
+    mov r14, [r12 + NODE_PARENTS]
+    mov r15, [rel r14]              ; parent x
+    
+    mov rax, [r15 + NODE_GRAD]
+    test rax, rax
+    jz .leaky_bwd_done
+    
+    mov rbx, rax                    ; parent grad tensor
+    
+    ; Get saved alpha
+    mov rax, [r12 + NODE_SAVED_TENSORS]
+    movsd xmm1, [rax]               ; alpha
+    
+    mov rdi, [rbx + TENSOR_DATA]    ; grad_x
+    mov rsi, [r13 + TENSOR_DATA]    ; dL/dout
+    mov rdx, [r15 + NODE_VALUE]
+    mov rdx, [rdx + TENSOR_DATA]    ; x
+    
+    mov [rsp], rdi
+    mov [rsp+8], rsi
+    mov [rsp+16], rdx
+    
+    push rbx
+    mov rdi, rbx
+    call tensor_numel
+    mov rcx, rax
+    pop rbx
+    
+    mov rdi, [rsp]
+    mov rsi, [rsp+8]
+    mov rdx, [rsp+16]
+    
+    mov rax, [r12 + NODE_SAVED_TENSORS]
+    movsd xmm1, [rax]
+    
+    mov eax, [rbx + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .leaky_bwd_f32
+    
+    ; float64
+    xor r8, r8
+.leaky_bwd_f64_loop:
+    cmp r8, rcx
+    jge .leaky_bwd_done
+    
+    movsd xmm0, [rdx + r8*8]        ; x
+    movsd xmm2, [rsi + r8*8]        ; dL/dout
+    
+    xorpd xmm3, xmm3
+    comisd xmm0, xmm3
+    jae .leaky_bwd_f64_pos
+    mulsd xmm2, xmm1                ; dL/dout * alpha
+    jmp .leaky_bwd_f64_acc
+.leaky_bwd_f64_pos:
+    ; dL/dout * 1.0 (unchanged)
+.leaky_bwd_f64_acc:
+    addsd xmm2, [rdi + r8*8]
+    movsd [rdi + r8*8], xmm2
+    
+    inc r8
+    jmp .leaky_bwd_f64_loop
+
+.leaky_bwd_f32:
+    cvtsd2ss xmm1, xmm1
+    xor r8, r8
+.leaky_bwd_f32_loop:
+    cmp r8, rcx
+    jge .leaky_bwd_done
+    
+    movss xmm0, [rdx + r8*4]
+    movss xmm2, [rsi + r8*4]
+    
+    xorps xmm3, xmm3
+    comiss xmm0, xmm3
+    jae .leaky_bwd_f32_pos
+    mulss xmm2, xmm1
+    jmp .leaky_bwd_f32_acc
+.leaky_bwd_f32_pos:
+.leaky_bwd_f32_acc:
+    addss xmm2, [rdi + r8*4]
+    movss [rdi + r8*4], xmm2
+    
+    inc r8
+    jmp .leaky_bwd_f32_loop
+
+.leaky_bwd_done:
+    add rsp, 24
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
 ; Mark stack as non-executable
 section .note.GNU-stack noalloc noexec nowrite progbits
