@@ -96,7 +96,17 @@ extern cross_entropy_loss
 
 extern sgd_create
 extern adam_create
+extern adamw_create
 extern optimizer_step
+
+; Sequential container functions
+extern neural_sequential_create
+extern neural_sequential_free
+extern neural_sequential_add
+extern neural_sequential_forward
+extern neural_sequential_size
+extern neural_sequential_get
+extern neural_sequential_parameters
 extern optimizer_free
 extern clip_grad_norm_
 extern clip_grad_value_
@@ -184,6 +194,7 @@ global neural_mse_loss
 global neural_cross_entropy_loss
 global neural_sgd_create
 global neural_adam_create
+global neural_adamw_create
 global neural_optimizer_free
 global neural_optimizer_step
 global neural_optimizer_zero_grad
@@ -1615,6 +1626,28 @@ neural_adam_create:
     ret
 
 ; =============================================================================
+; neural_adamw_create - Create AdamW optimizer
+; =============================================================================
+neural_adamw_create:
+    push rbp
+    mov rbp, rsp
+    
+    call adamw_create
+    
+    test rax, rax
+    jz .fail
+    
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.fail:
+    mov dword [rel last_error], NEURAL_ERR_OUT_OF_MEMORY
+
+.done:
+    pop rbp
+    ret
+
+; =============================================================================
 ; neural_optimizer_free - Free optimizer
 ; =============================================================================
 neural_optimizer_free:
@@ -2087,16 +2120,61 @@ neural_tanh:
     ret
 
 neural_linear_weight:
-    ; TODO: Implement getter
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    ; Get weight tensor from params[0]
+    mov rax, [rdi + MODULE_PARAMS]
+    test rax, rax
+    jz .null
+    mov rax, [rax]                 ; params[0] = weight
+    jmp .done
+
+.null:
     xor eax, eax
+
+.done:
+    pop rbp
     ret
 
-neural_linear_bias:
-    ; TODO: Implement getter
-    xor eax, eax
+neural_linear_free:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .done
+    
+    call module_free
+    
+.done:
+    pop rbp
     ret
 
-neural_mse_loss:
+neural_linear_forward:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    test rdx, rdx
+    jz .null
+    
+    call [rdi + MODULE_FORWARD_FN]
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
     push rbp
     mov rbp, rsp
     
@@ -2171,6 +2249,139 @@ neural_optimizer_zero_grad:
     ; Zero out gradient tensors
     mov dword [rel last_error], NEURAL_ERR_NOT_IMPLEMENTED
     mov eax, NEURAL_ERR_NOT_IMPLEMENTED
+    ret
+
+; =============================================================================
+; Sequential Container API Functions
+; =============================================================================
+
+neural_sequential_create:
+    push rbp
+    mov rbp, rsp
+    
+    call neural_sequential_create
+    test rax, rax
+    jz .error
+    
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.error:
+    mov dword [rel last_error], NEURAL_ERR_OUT_OF_MEMORY
+    xor eax, eax
+
+.done:
+    pop rbp
+    ret
+
+neural_sequential_free:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .done
+    
+    call neural_sequential_free
+    
+.done:
+    pop rbp
+    ret
+
+neural_sequential_add:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    
+    call neural_sequential_add
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
+
+neural_sequential_forward:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    test rdx, rdx
+    jz .null
+    
+    call neural_sequential_forward
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.null:
+    mov eax, NEURAL_ERR_NULL_POINTER
+    mov [rel last_error], eax
+
+.done:
+    pop rbp
+    ret
+
+neural_sequential_size:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    call neural_sequential_size
+    jmp .done
+
+.null:
+    xor eax, eax
+
+.done:
+    pop rbp
+    ret
+
+neural_sequential_get:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    call neural_sequential_get
+    jmp .done
+
+.null:
+    xor eax, eax
+
+.done:
+    pop rbp
+    ret
+
+neural_sequential_parameters:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    test rsi, rsi
+    jz .null
+    
+    call neural_sequential_parameters
+    jmp .done
+
+.null:
+    mov rax, -1
+
+.done:
+    pop rbp
     ret
 
 neural_node_create:

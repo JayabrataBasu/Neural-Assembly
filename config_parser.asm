@@ -26,6 +26,7 @@ section .data
     key_num_layers:     db "num_layers", 0
     key_activation:     db "activation", 0
     key_dropout_rate:   db "dropout_rate", 0
+    key_architecture:   db "architecture", 0
     
     ; Key names - Training
     key_epochs:         db "epochs", 0
@@ -187,6 +188,7 @@ OFF_NORMALIZE           equ 108
 OFF_HIDDEN_SIZES        equ 112
 OFF_LR_STEP_SIZE        equ 144
 OFF_LR_GAMMA            equ 148
+OFF_ARCHITECTURE        equ 152
 
 ; Activation enum
 ACT_RELU                equ 0
@@ -652,6 +654,13 @@ process_model_key:
     test eax, eax
     jnz .set_dropout_rate
     
+    ; Check architecture
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_architecture]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_architecture
+    
     jmp .model_key_done
     
 .set_input_size:
@@ -728,6 +737,24 @@ process_model_key:
     lea rdi, [rel value_buffer]
     call parse_float
     movss [r13 + OFF_DROPOUT_RATE], xmm0
+    jmp .model_key_done
+    
+.set_architecture:
+    ; Allocate memory for architecture string
+    lea rdi, [rel value_buffer]
+    call str_length
+    inc eax                     ; +1 for null terminator
+    mov edi, eax
+    call mem_alloc
+    
+    test rax, rax
+    jz .model_key_done          ; allocation failed, skip
+    
+    ; Copy string
+    mov [r13 + OFF_ARCHITECTURE], rax
+    lea rsi, [rel value_buffer]
+    mov rdi, rax
+    call str_copy
     jmp .model_key_done
     
 .model_key_done:
@@ -1563,6 +1590,12 @@ config_free:
     
 .free_test:
     mov rdi, [rbx + OFF_TEST_FILE]
+    test rdi, rdi
+    jz .free_architecture
+    call mem_free
+    
+.free_architecture:
+    mov rdi, [rbx + OFF_ARCHITECTURE]
     test rdi, rdi
     jz .free_config
     call mem_free

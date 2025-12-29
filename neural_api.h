@@ -50,6 +50,7 @@ typedef enum {
 typedef struct NeuralTensor NeuralTensor;
 typedef struct NeuralNode NeuralNode;
 typedef struct NeuralLinear NeuralLinear;
+typedef struct NeuralSequential NeuralSequential;
 typedef struct NeuralOptimizer NeuralOptimizer;
 typedef struct NeuralDataset NeuralDataset;
 typedef struct NeuralConfig NeuralConfig;
@@ -527,6 +528,65 @@ NeuralTensor* neural_linear_weight(NeuralLinear* layer);
 NeuralTensor* neural_linear_bias(NeuralLinear* layer);
 
 /* ============================================================================ */
+/* Sequential Container */
+/* ============================================================================ */
+
+/**
+ * @brief Create a sequential container for chaining modules.
+ * @param modules Array of modules to add (can be NULL for empty container)
+ * @param num_modules Number of modules in the array
+ * @return Pointer to sequential container, or NULL on error
+ */
+NeuralSequential* neural_sequential_create(NeuralLinear** modules, uint64_t num_modules);
+
+/**
+ * @brief Free a sequential container and all its modules.
+ * @param seq Sequential container to free
+ */
+void neural_sequential_free(NeuralSequential* seq);
+
+/**
+ * @brief Add a module to the end of the sequential container.
+ * @param seq Sequential container
+ * @param module Module to add
+ * @return NEURAL_OK on success, error code on failure
+ */
+int neural_sequential_add(NeuralSequential* seq, NeuralLinear* module);
+
+/**
+ * @brief Forward pass through all modules in the sequential container.
+ * @param seq Sequential container
+ * @param input Input tensor
+ * @param output Output tensor (final output after all modules)
+ * @return NEURAL_OK on success, error code on failure
+ */
+int neural_sequential_forward(NeuralSequential* seq, const NeuralTensor* input, NeuralTensor* output);
+
+/**
+ * @brief Get the number of modules in the sequential container.
+ * @param seq Sequential container
+ * @return Number of modules, or 0 if seq is NULL
+ */
+uint64_t neural_sequential_size(NeuralSequential* seq);
+
+/**
+ * @brief Get a module at the specified index.
+ * @param seq Sequential container
+ * @param index Index of the module (0-based)
+ * @return Pointer to module, or NULL if index is out of bounds
+ */
+NeuralLinear* neural_sequential_get(NeuralSequential* seq, uint64_t index);
+
+/**
+ * @brief Get all parameters from all modules in the container.
+ * @param seq Sequential container
+ * @param params Array to store parameter tensors (caller must allocate)
+ * @param max_params Maximum number of parameters to return
+ * @return Number of parameters found, or -1 on error
+ */
+int64_t neural_sequential_parameters(NeuralSequential* seq, NeuralTensor** params, uint64_t max_params);
+
+/* ============================================================================ */
 /* Loss Functions */
 /* ============================================================================ */
 
@@ -569,6 +629,7 @@ NeuralOptimizer* neural_sgd_create(double learning_rate, double momentum);
  * @return Pointer to optimizer, or NULL on error
  */
 NeuralOptimizer* neural_adam_create(double learning_rate, double beta1, double beta2, double epsilon);
+NeuralOptimizer* neural_adamw_create(double learning_rate, double beta1, double beta2, double epsilon, double weight_decay);
 
 /**
  * @brief Free an optimizer.

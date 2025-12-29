@@ -88,6 +88,12 @@ extern rand
 extern srand
 extern time
 
+; Linear layer functions
+extern neural_linear_free
+extern neural_linear_forward
+extern neural_linear_weight
+extern neural_linear_bias
+
 ; Export layer functions
 global linear_create
 global linear_forward
@@ -1028,5 +1034,546 @@ module_get_params:
     mov qword [rel rsi], 0
     pop rbp
     ret
+
+; =============================================================================
+; Sequential Container Implementation
+; =============================================================================
+
+; Sequential struct layout:
+; Offset  Size    Field
+; 0       8       capacity    (uint64_t) - allocated capacity
+; 8       8       size        (uint64_t) - number of modules
+; 16      8       modules     (NeuralLinear**) - array of module pointers
+
+%define SEQUENTIAL_CAPACITY  0
+%define SEQUENTIAL_SIZE      8
+%define SEQUENTIAL_MODULES   16
+%define SEQUENTIAL_SIZE_BYTES 24
+
+; Export sequential functions
+global neural_sequential_create
+global neural_sequential_free
+global neural_sequential_add
+global neural_sequential_forward
+global neural_sequential_size
+global neural_sequential_get
+global neural_sequential_parameters
+
+; =============================================================================
+; neural_sequential_create - Create a sequential container
+; Arguments:
+;   RDI = NeuralLinear** modules (can be NULL)
+;   RSI = uint64_t num_modules
+; Returns:
+;   RAX = NeuralSequential* or NULL on error
+; =============================================================================
+neural_sequential_create:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 8
+    
+    ; Save original parameters before mem_alloc clobbers them
+    mov r14, rdi                    ; r14 = modules array (may be NULL)
+    mov r15, rsi                    ; r15 = num_modules
+    
+    ; Allocate sequential struct
+    mov rdi, SEQUENTIAL_SIZE_BYTES
+    call mem_alloc
+    test rax, rax
+    jz .error
+    mov r12, rax                    ; r12 = sequential
+    
+    ; Initialize
+    mov qword [r12 + SEQUENTIAL_SIZE], 0
+    mov qword [r12 + SEQUENTIAL_CAPACITY], 0
+    mov qword [r12 + SEQUENTIAL_MODULES], 0
+    
+    ; If modules provided, add them
+    test r14, r14
+    jz .done
+    test r15, r15
+    jz .done
+    
+    mov rbx, r14                    ; rbx = modules array
+    mov r13, r15                    ; r13 = num_modules
+    
+.add_loop:
+    mov rdi, r12                    ; sequential
+    mov rsi, [rbx]                  ; current module
+    call neural_sequential_add
+    test eax, eax
+    jnz .error_free
+    
+    add rbx, 8                      ; next module pointer
+    dec r13
+    jnz .add_loop
+    
+.done:
+    mov rax, r12
+    add rsp, 8
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.error_free:
+    mov rdi, r12
+    call neural_sequential_free
+.error:
+    xor eax, eax
+    add rsp, 8
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_sequential_free - Free a sequential container
+; Arguments:
+;   RDI = NeuralSequential* seq
+; =============================================================================
+neural_sequential_free:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    
+    test rdi, rdi
+    jz .done
+    
+    mov r12, rdi                    ; r12 = sequential
+    
+    ; Free all modules
+    mov rbx, [r12 + SEQUENTIAL_MODULES]
+    test rbx, rbx
+    jz .free_struct
+    
+    xor rcx, rcx
+.free_loop:
+    cmp rcx, [r12 + SEQUENTIAL_SIZE]
+    jge .free_array
+    
+    mov rdi, [rbx + rcx*8]          ; module
+    test rdi, rdi
+    jz .next_module
+    
+    ; Call module free function
+    push rcx
+    push rbx
+    call module_free
+    pop rbx
+    pop rcx
+    
+.next_module:
+    inc rcx
+    jmp .free_loop
+    
+.free_array:
+    mov rdi, [r12 + SEQUENTIAL_MODULES]
+    call mem_free
+    
+.free_struct:
+    mov rdi, r12
+    call mem_free
+    
+.done:
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_sequential_add - Add a module to sequential container
+; Arguments:
+;   RDI = NeuralSequential* seq
+;   RSI = NeuralLinear* module
+; Returns:
+;   EAX = 0 on success, error code on failure
+; =============================================================================
+neural_sequential_add:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    
+    test rdi, rdi
+    jz .error_null
+    test rsi, rsi
+    jz .error_null
+    
+    mov r12, rdi                    ; r12 = sequential
+    mov r13, rsi                    ; r13 = module
+    
+    ; Check if we need to resize
+    mov rax, [r12 + SEQUENTIAL_SIZE]
+    cmp rax, [r12 + SEQUENTIAL_CAPACITY]
+    jl .add_module
+    
+    ; Need to resize - double capacity or start with 4
+    mov rbx, [r12 + SEQUENTIAL_CAPACITY]
+    test rbx, rbx
+    jnz .double_capacity
+    mov rbx, 4                      ; initial capacity
+    jmp .resize
+    
+.double_capacity:
+    shl rbx, 1                      ; double capacity
+    
+.resize:
+    ; Allocate new array
+    mov rdi, rbx
+    shl rdi, 3                      ; 8 bytes per pointer
+    call mem_alloc
+    test rax, rax
+    jz .error_memory
+    
+    mov rcx, rax                    ; rcx = new array
+    
+    ; Copy existing modules
+    mov rdx, [r12 + SEQUENTIAL_MODULES]
+    test rdx, rdx
+    jz .copy_done
+    
+    mov rsi, [r12 + SEQUENTIAL_SIZE]
+    test rsi, rsi
+    jz .copy_done
+    
+    ; Copy old array to new
+    push rcx
+    mov rdi, rcx
+    mov rcx, rsi
+    rep movsq
+    pop rcx
+    
+.copy_done:
+    ; Free old array
+    mov rdi, [r12 + SEQUENTIAL_MODULES]
+    test rdi, rdi
+    jz .update_struct
+    call mem_free
+    
+.update_struct:
+    mov [r12 + SEQUENTIAL_MODULES], rcx
+    mov [r12 + SEQUENTIAL_CAPACITY], rbx
+    
+.add_module:
+    ; Add module to array
+    mov rax, [r12 + SEQUENTIAL_SIZE]
+    mov rcx, [r12 + SEQUENTIAL_MODULES]
+    mov [rcx + rax*8], r13
+    inc rax
+    mov [r12 + SEQUENTIAL_SIZE], rax
+    
+    xor eax, eax                    ; success
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.error_memory:
+    mov eax, 2                      ; NEURAL_ERR_OUT_OF_MEMORY
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.error_null:
+    mov eax, 1                      ; NEURAL_ERR_NULL_POINTER
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_sequential_forward - Forward pass through all modules
+; Arguments:
+;   RDI = NeuralSequential* seq
+;   RSI = const NeuralTensor* input
+;   RDX = NeuralTensor* output
+; Returns:
+;   EAX = 0 on success, error code on failure
+; =============================================================================
+neural_sequential_forward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 16                     ; space for intermediate tensor
+    
+    test rdi, rdi
+    jz .error_null
+    test rsi, rsi
+    jz .error_null
+    test rdx, rdx
+    jz .error_null
+    
+    mov r12, rdi                    ; r12 = sequential
+    mov r13, rsi                    ; r13 = input
+    mov r14, rdx                    ; r14 = final output
+    
+    ; Check if empty
+    mov rax, [r12 + SEQUENTIAL_SIZE]
+    test rax, rax
+    jz .error_empty
+    
+    ; For single module, forward directly to output
+    cmp rax, 1
+    je .single_module
+    
+    ; Multiple modules - need intermediate tensors
+    ; For now, we'll assume caller provides properly sized intermediate tensors
+    ; TODO: Implement automatic intermediate tensor management
+    
+    xor rbx, rbx                    ; rbx = current module index
+    mov r15, r13                    ; r15 = current input
+    
+.forward_loop:
+    cmp rbx, [r12 + SEQUENTIAL_SIZE]
+    jge .done
+    
+    ; Get current module
+    mov rcx, [r12 + SEQUENTIAL_MODULES]
+    mov rdi, [rcx + rbx*8]          ; module
+    
+    ; Determine output tensor
+    mov rax, [r12 + SEQUENTIAL_SIZE]
+    dec rax
+    cmp rbx, rax
+    je .use_final_output
+    
+    ; Use intermediate tensor (for now, assume caller handles this)
+    ; This is a limitation - proper implementation would need intermediate tensors
+    mov rsi, r15                    ; input
+    mov rdx, r14                    ; output (temporary)
+    call [rdi + MODULE_FORWARD_FN]
+    test eax, eax
+    jnz .error
+    
+    mov r15, r14                    ; next input is current output
+    jmp .next
+    
+.use_final_output:
+    mov rsi, r15                    ; input
+    mov rdx, r14                    ; final output
+    call [rdi + MODULE_FORWARD_FN]
+    test eax, eax
+    jnz .error
+    
+.next:
+    inc rbx
+    jmp .forward_loop
+    
+.single_module:
+    mov rcx, [r12 + SEQUENTIAL_MODULES]
+    mov rdi, [rcx]                  ; first (only) module
+    mov rsi, r13                    ; input
+    mov rdx, r14                    ; output
+    call [rdi + MODULE_FORWARD_FN]
+    test eax, eax
+    jnz .error
+    
+.done:
+    xor eax, eax
+    add rsp, 16
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.error_empty:
+    mov eax, 3                      ; NEURAL_ERR_INVALID_ARGUMENT
+    add rsp, 16
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.error_null:
+    mov eax, 1                      ; NEURAL_ERR_NULL_POINTER
+    add rsp, 16
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.error:
+    add rsp, 16
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_sequential_size - Get number of modules
+; Arguments:
+;   RDI = NeuralSequential* seq
+; Returns:
+;   RAX = number of modules
+; =============================================================================
+neural_sequential_size:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    mov rax, [rdi + SEQUENTIAL_SIZE]
+    pop rbp
+    ret
+    
+.null:
+    xor eax, eax
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_sequential_get - Get module at index
+; Arguments:
+;   RDI = NeuralSequential* seq
+;   RSI = uint64_t index
+; Returns:
+;   RAX = NeuralLinear* or NULL
+; =============================================================================
+neural_sequential_get:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null
+    
+    cmp rsi, [rdi + SEQUENTIAL_SIZE]
+    jge .null
+    
+    mov rcx, [rdi + SEQUENTIAL_MODULES]
+    mov rax, [rcx + rsi*8]
+    
+    pop rbp
+    ret
+    
+.null:
+    xor eax, eax
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_sequential_parameters - Get all parameters
+; Arguments:
+;   RDI = NeuralSequential* seq
+;   RSI = NeuralTensor** params
+;   RDX = uint64_t max_params
+; Returns:
+;   RAX = number of parameters found, or -1 on error
+; =============================================================================
+neural_sequential_parameters:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    
+    test rdi, rdi
+    jz .error
+    test rsi, rsi
+    jz .error
+    
+    mov r12, rdi                    ; r12 = sequential
+    mov r13, rsi                    ; r13 = params array
+    mov r14, rdx                    ; r14 = max_params
+    
+    xor r15, r15                    ; r15 = param count
+    
+    ; Iterate through all modules
+    xor rbx, rbx                    ; rbx = module index
+.param_loop:
+    cmp rbx, [r12 + SEQUENTIAL_SIZE]
+    jge .done
+    
+    mov rcx, [r12 + SEQUENTIAL_MODULES]
+    mov rdi, [rcx + rbx*8]          ; current module
+    test rdi, rdi
+    jz .next_module                 ; skip null modules
+    
+    ; Get params array from module
+    mov rax, [rdi + MODULE_PARAMS]  ; get params array
+    test rax, rax
+    jz .next_module
+    
+    ; Get weight tensor (params[0])
+    mov rsi, [rax]                  ; weight tensor
+    test rsi, rsi
+    jz .check_bias
+    cmp r15, r14
+    jge .done                       ; no more room
+    mov [r13 + r15*8], rsi
+    inc r15
+    
+.check_bias:
+    ; Get bias tensor (params[1])
+    mov rax, [rdi + MODULE_PARAMS]  ; get params array again
+    test rax, rax
+    jz .next_module
+    mov rsi, [rax + 8]              ; bias tensor
+    test rsi, rsi
+    jz .next_module
+    cmp r15, r14
+    jge .done                       ; no more room
+    mov [r13 + r15*8], rsi
+    inc r15
+    
+.next_module:
+    inc rbx
+    jmp .param_loop
+    
+.done:
+    mov rax, r15
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.error:
+    mov rax, -1
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
 ; Mark stack as non-executable
 section .note.GNU-stack noalloc noexec nowrite progbits

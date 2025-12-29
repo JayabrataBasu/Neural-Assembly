@@ -27,6 +27,9 @@ section .data
     cmd_infer:      db "infer", 0
     cmd_test:       db "test", 0
     
+    ; Sequential parsing
+    seq_prefix:     db "Sequential(", 0
+    
     ; Status messages
     msg_loading:    db "[*] Loading configuration...", 10, 0
     msg_config_ok:  db "[+] Configuration loaded successfully", 10, 0
@@ -116,6 +119,36 @@ section .text
     extern config_create_default
     extern config_free
     
+    ; Config offsets
+    OFF_INPUT_SIZE          equ 0
+    OFF_HIDDEN_SIZE         equ 4
+    OFF_OUTPUT_SIZE         equ 8
+    OFF_NUM_LAYERS          equ 12
+    OFF_ACTIVATION          equ 16
+    OFF_DROPOUT_RATE        equ 20
+    OFF_EPOCHS              equ 24
+    OFF_BATCH_SIZE          equ 28
+    OFF_LEARNING_RATE       equ 32
+    OFF_WEIGHT_DECAY        equ 36
+    OFF_EARLY_STOPPING      equ 40
+    OFF_PATIENCE            equ 44
+    OFF_OPTIMIZER_TYPE      equ 48
+    OFF_MOMENTUM            equ 52
+    OFF_BETA1               equ 56
+    OFF_BETA2               equ 60
+    OFF_EPSILON             equ 64
+    OFF_TRAIN_FILE          equ 68
+    OFF_TEST_FILE           equ 76
+    OFF_TRAIN_LABEL_FILE    equ 84
+    OFF_TEST_LABEL_FILE     equ 92
+    OFF_VAL_SPLIT           equ 100
+    OFF_SHUFFLE             equ 104
+    OFF_NORMALIZE           equ 108
+    OFF_HIDDEN_SIZES        equ 112
+    OFF_LR_STEP_SIZE        equ 144
+    OFF_LR_GAMMA            equ 148
+    OFF_ARCHITECTURE        equ 152
+    
     ; Model I/O
     extern model_save
     extern model_load
@@ -149,6 +182,15 @@ section .text
     extern sigmoid_backward
     extern softmax_forward
     extern softmax_backward
+    
+    ; Sequential container
+    extern neural_sequential_create
+    extern neural_sequential_free
+    extern neural_sequential_add
+    extern neural_sequential_forward
+    extern neural_sequential_size
+    extern neural_sequential_get
+    extern neural_sequential_parameters
     
     ; Losses
     extern mse_loss
@@ -791,6 +833,7 @@ print_config_summary:
 ; Returns:
 ;   rax - model pointer
 ; Builds: Input -> [Linear -> ReLU] x num_layers -> Linear -> Softmax
+; Or parses architecture string for Sequential models
 build_model:
     push rbp
     mov rbp, rsp
@@ -803,6 +846,18 @@ build_model:
     
     mov r12, rdi                ; config
     
+    ; Check if architecture is specified
+    mov rax, [r12 + 152]        ; OFF_ARCHITECTURE
+    test rax, rax
+    jz .legacy_build            ; no architecture, use legacy build
+    
+    ; Parse architecture string for Sequential
+    mov rdi, rax
+    mov rsi, r12
+    call parse_architecture
+    jmp .build_done
+    
+.legacy_build:
     ; Get model parameters from config
     mov eax, [rel r12]              ; input_size (offset 0)
     mov [rbp - 48], eax         ; save input_size
@@ -911,15 +966,22 @@ count_parameters:
     mov rbp, rsp
     push rbx
     push r12
+    push r13
+    push r14
     
     mov r12, rdi
     xor ebx, ebx                ; counter
     
-    ; Iterate through layers
+    ; Check if this is a legacy model
+    mov rax, [r12 + 8]          ; check second field
+    cmp rax, 0x1000             ; if < 0x1000, probably capacity (Sequential)
+    jb .sequential_count        ; else, probably layer pointer (legacy)
+    
+    ; Legacy model format
     mov ecx, [rel r12]              ; num_layers
     lea rdi, [r12 + 8]
     
-.count_loop:
+.legacy_count_loop:
     test ecx, ecx
     jz .count_done
     
@@ -928,12 +990,9 @@ count_parameters:
     ; Check if it's a real layer (pointer > 100)
     ; Values 1, 2 are markers for ReLU, Softmax
     cmp rax, 100
-    jb .count_next
+    jb .legacy_count_next
     
     ; Get layer's param tensors and count elements
-    ; Module structure:
-    ;   offset 0 = n_params (dword)
-    ;   offset 8 = params (Tensor**)
     push rcx
     push rdi
     mov r8, rax                 ; module pointer
@@ -941,15 +1000,15 @@ count_parameters:
     mov ecx, [rel r8]               ; n_params
     mov rsi, [r8 + 8]           ; params array
     test rsi, rsi
-    jz .count_params_done
+    jz .legacy_count_params_done
     
-.count_param_loop:
+.legacy_count_param_loop:
     test ecx, ecx
-    jz .count_params_done
+    jz .legacy_count_params_done
     
     mov rdi, [rel rsi]              ; params[rel i] = tensor pointer
     test rdi, rdi
-    jz .count_param_next
+    jz .legacy_count_param_next
     
     push rcx
     push rsi
@@ -958,25 +1017,413 @@ count_parameters:
     pop rsi
     pop rcx
     
-.count_param_next:
+.legacy_count_param_next:
     add rsi, 8
     dec ecx
-    jmp .count_param_loop
+    jmp .legacy_count_param_loop
     
-.count_params_done:
+.legacy_count_params_done:
     pop rdi
     pop rcx
     
-.count_next:
+.legacy_count_next:
     add rdi, 8
     dec ecx
-    jmp .count_loop
+    jmp .legacy_count_loop
+    
+    jmp .count_done
+    
+.sequential_count:
+    ; For Sequential models, get all parameter tensors and count their sizes
+    ; Save r12 (Sequential pointer) and ebx (counter, which is 0)
+    ; Allocate buffer for params
+    mov edi, 100*8
+    call mem_alloc
+    test rax, rax
+    jz .count_done
+    
+    mov r13, rax                ; r13 = params array buffer
+    
+    ; Get parameters from Sequential
+    mov rdi, r12                ; Sequential pointer
+    mov rsi, r13                ; params array buffer
+    mov rdx, 100                ; max params
+    call neural_sequential_parameters
+    
+    test rax, rax
+    jz .count_cleanup
+    
+    mov rcx, rax                ; rcx = param count
+    mov r14, r13                ; r14 = current param pointer
+    
+.seq_count_loop:
+    test rcx, rcx
+    jz .count_cleanup
+    
+    mov rdi, [r14]              ; tensor pointer
+    test rdi, rdi
+    jz .seq_count_next
+    
+    push rcx
+    push r14
+    call tensor_get_size
+    add ebx, eax                ; add to counter (ebx)
+    pop r14
+    pop rcx
+    
+.seq_count_next:
+    add r14, 8                  ; next param
+    dec rcx
+    jmp .seq_count_loop
+    
+.count_cleanup:
+    ; Free temporary array
+    mov rdi, r13
+    call mem_free
     
 .count_done:
     mov eax, ebx
+    pop r14
+    pop r13
     pop r12
     pop rbx
     pop rbp
+    ret
+
+; parse_architecture - Parse architecture string and build model
+; Arguments:
+;   rdi - architecture string
+;   rsi - config pointer
+; Returns:
+;   rax - model pointer (Sequential or legacy)
+parse_architecture:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 64
+    
+    mov r12, rdi                ; architecture string
+    mov r14, rsi                ; config pointer
+    
+    ; Check if it starts with "Sequential("
+    lea rsi, [rel seq_prefix]
+    mov ecx, 11                 ; length of "Sequential("
+    call str_starts_with
+    test eax, eax
+    jz .parse_legacy            ; not Sequential, try legacy format
+    
+    ; Parse Sequential format
+    ; For now, just create a simple Sequential with Linear layers
+    ; TODO: Implement full Sequential parsing
+    
+    ; Create Sequential container
+    call neural_sequential_create
+    test rax, rax
+    jz .parse_error
+    
+    mov r13, rax                ; sequential pointer
+    
+    ; For now, parse comma-separated numbers and create Linear layers
+    ; This is a temporary implementation
+    mov rdi, r12
+    add rdi, 11                 ; skip "Sequential("
+    mov rsi, r14                ; config pointer
+    call parse_layer_sizes
+    
+    ; TODO: Parse actual module specifications
+    
+    mov rax, r13
+    jmp .parse_done
+    
+.parse_legacy:
+    ; Parse comma-separated layer sizes
+    mov rdi, r12
+    mov rsi, r14                ; config pointer
+    call parse_layer_sizes
+    jmp .parse_done
+    
+.parse_error:
+    xor eax, eax
+    
+.parse_done:
+    add rsp, 64
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; parse_layer_sizes - Parse comma-separated layer sizes
+; Arguments:
+;   rdi - string like "10,64,64,10"
+;   rsi - config pointer
+; Returns:
+;   rax - model pointer
+parse_layer_sizes:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 96
+    
+    mov r12, rdi                ; string pointer
+    mov r15, rsi                ; config pointer
+    lea r13, [rbp - 80]         ; layer sizes array (up to 8 layers)
+    xor r14d, r14d              ; layer count
+    
+.parse_loop:
+    ; Skip whitespace
+.skip_space:
+    mov al, [r12]
+    test al, al
+    jz .parse_done
+    cmp al, ' '
+    je .next_char
+    cmp al, ','
+    je .next_char
+    cmp al, ')'
+    je .parse_done
+    jmp .parse_number
+    
+.next_char:
+    inc r12
+    jmp .skip_space
+    
+.parse_number:
+    ; Parse integer
+    mov rdi, r12
+    call parse_int_from_str
+    mov [r13 + r14*4], eax      ; store layer size
+    mov r12, rdi                ; update string pointer
+    inc r14d                    ; increment count
+    
+    ; Skip to next comma or end
+.skip_to_next:
+    mov al, [r12]
+    test al, al
+    jz .parse_done
+    cmp al, ','
+    je .next_after_comma
+    cmp al, ')'
+    je .parse_done
+    inc r12
+    jmp .skip_to_next
+    
+.next_after_comma:
+    inc r12
+    jmp .parse_loop
+    
+.parse_done:
+    ; Set config fields from parsed layer sizes
+    mov eax, [r13]              ; input_size = first layer
+    mov [r15 + OFF_INPUT_SIZE], eax
+    mov eax, [r13 + r14*4 - 4]  ; output_size = last layer
+    mov [r15 + OFF_OUTPUT_SIZE], eax
+    mov eax, r14d
+    sub eax, 1                  ; num_layers = transitions
+    mov [r15 + OFF_NUM_LAYERS], eax
+    ; For simplicity, set hidden_size to the first hidden layer
+    cmp r14d, 3
+    jb .no_hidden
+    mov eax, [r13 + 4]          ; second layer
+    mov [r15 + OFF_HIDDEN_SIZE], eax
+.no_hidden:
+    
+    ; Now build the model from layer sizes
+    cmp r14d, 2
+    jb .parse_error             ; need at least input and output
+    
+    ; Create Sequential
+    ; Save r13, r14 before calling neural_sequential_create (which clobbers them)
+    push r13
+    push r14
+    
+    ; Call with NULL modules (will allocate empty Sequential)
+    xor edi, edi                ; NULL modules
+    xor esi, esi                ; 0 num_modules
+    call neural_sequential_create
+    
+    ; Restore r13, r14
+    pop r14
+    pop r13
+    
+    test rax, rax
+    jz .parse_error
+    
+    mov rbx, rax                ; sequential pointer
+    
+    ; Add layers
+    xor r8d, r8d                ; current index
+    mov ecx, r14d
+    dec ecx                     ; number of transitions
+    
+.add_layers:
+    cmp r8d, ecx
+    jge .add_done
+    
+    ; Get input and output sizes - save registers before call
+    push rcx
+    push r8
+    push rbx
+    push r13
+    
+    mov edi, [r13 + r8*4]      ; in_features
+    mov esi, [r13 + r8*4 + 4]  ; out_features
+    
+    ; Create Linear layer
+    xor edx, edx                ; dtype = DT_FLOAT32
+    call linear_create
+    
+    ; Restore registers
+    pop r13
+    pop rbx
+    pop r8
+    pop rcx
+    
+    test rax, rax
+    jz .parse_error
+    
+    ; Add to Sequential - save registers again
+    push rcx
+    push r8
+    push rbx
+    push r13
+    
+    mov rdi, rbx                ; sequential pointer
+    mov rsi, rax                ; linear layer
+    call neural_sequential_add
+    
+    ; Restore registers
+    pop r13
+    pop rbx
+    pop r8
+    pop rcx
+    
+    ; Add ReLU if not the last layer
+    mov eax, r8d
+    inc eax
+    cmp eax, ecx
+    jge .next_layer
+    
+    ; Create ReLU (placeholder - need to implement)
+    ; For now, skip activation
+    
+.next_layer:
+    inc r8d
+    jmp .add_layers
+    
+.add_done:
+    mov rax, rbx
+    jmp .cleanup
+    
+.parse_error:
+    xor eax, eax
+    
+.cleanup:
+    add rsp, 96
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; str_starts_with - Check if string starts with prefix
+; Arguments:
+;   rdi - string
+;   rsi - prefix
+;   ecx - prefix length
+; Returns:
+;   eax - 1 if starts with, 0 otherwise
+str_starts_with:
+    push rbx
+    xor ebx, ebx                ; index
+    
+.check_loop:
+    cmp ebx, ecx
+    je .starts_with
+    
+    mov al, [rdi + rbx]
+    mov dl, [rsi + rbx]
+    cmp al, dl
+    jne .not_starts_with
+    
+    inc ebx
+    jmp .check_loop
+    
+.starts_with:
+    mov eax, 1
+    jmp .done
+    
+.not_starts_with:
+    xor eax, eax
+    
+.done:
+    pop rbx
+    ret
+
+; parse_int_from_str - Parse integer from string
+; Arguments:
+;   rdi - string pointer (updated to point after number)
+; Returns:
+;   eax - parsed integer
+;   rdi - updated string pointer
+parse_int_from_str:
+    push rbx
+    xor eax, eax                ; result
+    xor ebx, ebx                ; sign (0=positive)
+    
+    ; Skip whitespace
+.skip_space:
+    mov dl, [rdi]
+    cmp dl, ' '
+    je .next_space
+    cmp dl, '-'
+    je .negative
+    jmp .parse_digits
+    
+.next_space:
+    inc rdi
+    jmp .skip_space
+    
+.negative:
+    mov bl, 1                   ; negative
+    inc rdi
+    
+.parse_digits:
+    mov dl, [rdi]
+    cmp dl, '0'
+    jb .done
+    cmp dl, '9'
+    ja .done
+    
+    ; Multiply current result by 10
+    imul eax, 10
+    
+    ; Add digit
+    sub dl, '0'
+    add eax, edx
+    
+    inc rdi
+    jmp .parse_digits
+    
+.done:
+    test bl, bl
+    jz .positive
+    neg eax
+    
+.positive:
+    pop rbx
     ret
 
 ; create_optimizer - Create optimizer based on config
@@ -1007,29 +1454,35 @@ create_optimizer:
     mov [rbp-64], rsi           ; save model
     
     ; First, count total params across all layers
-    ; Model structure: offset 0 = num_layers, offset 8+ = layer pointers
     mov r12, rsi                ; model
-    mov ecx, [rel r12]              ; num_layers
+    
+    ; Check if this is a legacy model
+    mov rax, [rsi + 8]          ; check second field
+    cmp rax, 0x1000             ; if < 0x1000, probably capacity (Sequential)
+    jb .sequential_optimizer    ; else, probably layer pointer (legacy)
+    
+    ; Legacy model format
+    mov ecx, [r12]              ; num_layers
     xor r13d, r13d              ; total params count
     lea r14, [r12 + 8]          ; layer pointer array
     
-.count_params_loop:
+.legacy_count_params_loop:
     test ecx, ecx
-    jz .count_params_done
+    jz .legacy_count_params_done
     
-    mov rax, [rel r14]              ; layer pointer
+    mov rax, [r14]              ; layer pointer
     cmp rax, 100                ; skip markers (1=ReLU, 2=Softmax)
-    jb .count_next_layer
+    jb .legacy_count_next_layer
     
     ; Real layer - add its n_params
-    add r13d, [rel rax]             ; module->n_params at offset 0
+    add r13d, [rax]             ; module->n_params at offset 0
     
-.count_next_layer:
+.legacy_count_next_layer:
     add r14, 8
     dec ecx
-    jmp .count_params_loop
+    jmp .legacy_count_params_loop
     
-.count_params_done:
+.legacy_count_params_done:
     mov [rbp-84], r13d          ; save total count
     
     ; Allocate params array (n_params * 8 bytes)
@@ -1052,55 +1505,123 @@ create_optimizer:
     
     ; Now collect params and param_nodes from all layers
     mov r12, [rbp-64]           ; model
-    mov ecx, [rel r12]              ; num_layers
+    mov ecx, [r12]              ; num_layers
     lea r14, [r12 + 8]          ; layer pointer array
     mov dword [rbp-88], 0       ; current index = 0
     mov r15, [rbp-72]           ; params dest
     mov rbx, [rbp-80]           ; param_nodes dest
     
-.collect_loop:
+.legacy_collect_loop:
     test ecx, ecx
     jz .collect_done
     
     push rcx                    ; save counter
     
-    mov rax, [rel r14]              ; layer pointer
+    mov rax, [r14]              ; layer pointer
     cmp rax, 100
-    jb .collect_next
+    jb .legacy_collect_next
     
     ; Module struct:
     ;   offset 0: n_params
     ;   offset 8: params (Tensor**)
     ;   offset 16: param_nodes (Node**)
     mov r12, rax                ; module
-    mov ecx, [rel r12]              ; layer's n_params
+    mov ecx, [r12]              ; layer's n_params
     mov rsi, [r12 + 8]          ; params array
     mov rdi, [r12 + 16]         ; param_nodes array
     
-.collect_layer_params:
+.legacy_collect_layer_params:
     test ecx, ecx
-    jz .collect_next
+    jz .legacy_collect_next
     
     ; Copy param tensor pointer
-    mov rax, [rel rsi]
-    mov [rel r15], rax
+    mov rax, [rsi]
+    mov [r15], rax
     add r15, 8
     add rsi, 8
     
     ; Copy param_node pointer (for optimizer to get grad later)
-    mov rax, [rel rdi]
-    mov [rel rbx], rax
+    mov rax, [rdi]
+    mov [rbx], rax
     add rbx, 8
     add rdi, 8
     
     dec ecx
-    jmp .collect_layer_params
+    jmp .legacy_collect_layer_params
     
-.collect_next:
+.legacy_collect_next:
     pop rcx
     add r14, 8
     dec ecx
-    jmp .collect_loop
+    jmp .legacy_collect_loop
+    
+    jmp .collect_done
+    
+.sequential_optimizer:
+    ; Allocate a temporary large params array (assume max 100 params)
+    mov edi, 100*8
+    call mem_alloc
+    test rax, rax
+    jz .opt_error
+    mov [rbp-72], rax           ; params array
+    
+    ; Get parameters from model
+    mov rdi, r12
+    mov rsi, rax                ; params array
+    mov rdx, 100                ; max params
+    call neural_sequential_parameters
+    test rax, rax
+    jz .opt_error
+    
+    mov [rbp-84], eax           ; save total count
+    
+    ; Allocate param_nodes array (n_params * 8 bytes)
+    mov eax, [rbp-84]
+    shl eax, 3
+    mov edi, eax
+    call mem_alloc
+    test rax, rax
+    jz .opt_error
+    mov [rbp-80], rax           ; param_nodes array
+    
+    ; Now collect params and param_nodes from Sequential modules
+    mov r15, [rbp-72]           ; params array
+    mov rbx, [rbp-80]           ; param_nodes array
+    
+    ; Iterate through Sequential modules
+    mov rdi, r12                ; model (Sequential)
+    xor r14d, r14d              ; module index
+    
+.collect_seq_params:
+    mov rsi, r14
+    call neural_sequential_get
+    test rax, rax
+    jz .collect_done
+    
+    mov r13, rax                ; current module
+    
+    ; Get params and param_nodes from module
+    mov rcx, [r13 + 8]          ; MODULE_PARAMS
+    mov rdx, [r13 + 16]         ; MODULE_PARAM_NODES
+    
+    ; Copy weight tensor and node
+    mov rax, [rcx]              ; weight tensor
+    mov [r15], rax
+    mov rax, [rdx]              ; weight node
+    mov [rbx], rax
+    add r15, 8
+    add rbx, 8
+    
+    ; Copy bias tensor and node
+    mov rax, [rcx + 8]          ; bias tensor
+    mov [r15], rax
+    mov rax, [rdx + 8]          ; bias node
+    mov [rbx], rax
+    add r15, 8
+    add rbx, 8
+    
+    inc r14d
+    jmp .collect_seq_params
     
 .collect_done:
     ; Now create the optimizer with collected arrays
@@ -1411,6 +1932,13 @@ train_epoch:
 model_forward:
     push rbp
     mov rbp, rsp
+    
+    ; Check if this is a legacy model
+    mov rax, [rdi + 8]          ; check second field
+    cmp rax, 0x1000             ; if < 0x1000, probably capacity (Sequential)
+    jb .sequential_model        ; else, probably layer pointer (legacy)
+    
+    ; Legacy model format
     push rbx
     push r12
     push r13
@@ -1475,6 +2003,52 @@ model_forward:
     pop r13
     pop r12
     pop rbx
+    jmp .done
+    
+.sequential_model:
+    ; Sequential model - iterate modules and call linear_forward on each
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 8
+    
+    mov r12, rdi                ; sequential
+    mov r13, rsi                ; current input node
+    
+    ; Get number of modules - size is at offset 8, not 0!
+    mov r14, [r12 + 8]          ; size (SEQUENTIAL_SIZE at offset 8)
+    xor r15d, r15d              ; module index
+    
+.seq_forward_loop:
+    cmp r15, r14
+    jge .seq_forward_done
+    
+    ; Get module - modules array is at offset 16
+    mov rax, [r12 + 16]         ; SEQUENTIAL_MODULES at offset 16
+    mov rdi, [rax + r15*8]      ; modules[r15]
+    
+    ; Call linear_forward(module, input) -> output
+    mov rsi, r13                ; input node
+    call linear_forward
+    
+    mov r13, rax                ; output becomes next input
+    
+    inc r15
+    jmp .seq_forward_loop
+    
+.seq_forward_done:
+    mov rax, r13                ; return final output
+    
+    add rsp, 8
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    
+.done:
     pop rbp
     ret
 

@@ -92,6 +92,11 @@ global optimizer_load_state
 global clip_grad_norm_
 global clip_grad_value_
 
+; AdamW optimizer globals
+global adamw_create
+global adamw_step
+global adamw_zero_grad
+
 ; =============================================================================
 ; sgd_create - Create SGD optimizer
 ; Arguments:
@@ -1610,6 +1615,412 @@ clip_grad_value_:
     pop rbx
     pop rbp
     ret
+
+; =============================================================================
+; adamw_create - Create AdamW optimizer
+; Arguments:
+;   RDI = Tensor** params
+;   RSI = Node** param_nodes
+;   RDX = n_params (uint32_t)
+;   XMM0 = lr (double)
+;   XMM1 = beta1 (double)
+;   XMM2 = beta2 (double)
+;   XMM3 = eps (double)
+;   XMM4 = weight_decay (double)
+; Returns:
+;   RAX = Optimizer*
+; =============================================================================
+adamw_create:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 80
+    
+    mov r12, rdi                    ; params
+    mov r13, rsi                    ; param_nodes
+    mov r14d, edx                   ; n_params
+    movsd [rel rsp], xmm0               ; lr
+    movsd [rsp+8], xmm1             ; beta1
+    movsd [rsp+16], xmm2            ; beta2
+    movsd [rsp+24], xmm3            ; eps
+    movsd [rsp+32], xmm4            ; weight_decay
+    
+    ; Allocate optimizer struct
+    mov rdi, OPT_SIZE
+    mov rsi, 16
+    call mem_alloc_aligned
+    test rax, rax
+    jz .alloc_failed
+    mov r15, rax
+    
+    ; Initialize optimizer
+    mov [r15 + OPT_N_PARAMS], r14d
+    mov [r15 + OPT_PARAMS], r12
+    mov [r15 + OPT_PARAM_NODES], r13
+    
+    lea rax, [rel adamw_step]
+    mov [r15 + OPT_STEP_FN], rax
+    lea rax, [rel adamw_zero_grad]
+    mov [r15 + OPT_ZERO_GRAD_FN], rax
+    
+    ; Allocate AdamW state (64 bytes - same as Adam + weight_decay)
+    mov rdi, 64
+    call mem_alloc
+    mov [r15 + OPT_STATE], rax
+    mov rbx, rax
+    
+    ; Copy hyperparameters
+    movsd xmm0, [rel rsp]
+    movsd [rel rbx], xmm0               ; lr
+    movsd xmm0, [rsp+8]
+    movsd [rbx+8], xmm0             ; beta1
+    movsd xmm0, [rsp+16]
+    movsd [rbx+16], xmm0            ; beta2
+    movsd xmm0, [rsp+24]
+    movsd [rbx+24], xmm0            ; eps
+    movsd xmm0, [rsp+32]
+    movsd [rbx+32], xmm0            ; weight_decay
+    mov qword [rbx+40], 0           ; t = 0
+    
+    ; Allocate m and v arrays
+    mov eax, r14d
+    shl eax, 3
+    mov edi, eax
+    call mem_alloc
+    mov [rbx+48], rax               ; m array
+    mov [rsp+40], rax
+    
+    mov eax, r14d
+    shl eax, 3
+    mov edi, eax
+    call mem_alloc
+    mov [rbx+56], rax               ; v array
+    mov [rsp+48], rax
+    
+    ; Create m and v tensors (zeros)
+    xor ecx, ecx
+.create_moments:
+    cmp ecx, r14d
+    jge .done
+    
+    push rcx
+    mov rax, [r12 + rcx*8]
+    mov rdi, [rax + TENSOR_NDIM]
+    mov rsi, [rax + TENSOR_SHAPE]
+    mov edx, [rax + TENSOR_DTYPE]
+    call tensor_zeros
+    mov rcx, [rel rsp]
+    mov r8, [rsp+48]                ; m array (adjusted for push)
+    mov [r8 + rcx*8], rax
+    
+    mov rax, [r12 + rcx*8]
+    mov rdi, [rax + TENSOR_NDIM]
+    mov rsi, [rax + TENSOR_SHAPE]
+    mov edx, [rax + TENSOR_DTYPE]
+    call tensor_zeros
+    pop rcx
+    mov r8, [rsp+56]                ; v array
+    mov [r8 + rcx*8], rax
+    
+    inc ecx
+    jmp .create_moments
+
+.done:
+    mov rax, r15
+    
+    add rsp, 80
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.alloc_failed:
+    xor eax, eax
+    add rsp, 80
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; adamw_step - Perform one AdamW optimization step
+; Arguments:
+;   RDI = Optimizer* opt
+; =============================================================================
+adamw_step:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 120
+    
+    mov r12, rdi                    ; optimizer
+    
+    mov r13d, [r12 + OPT_N_PARAMS]
+    mov r14, [r12 + OPT_PARAMS]
+    mov r15, [r12 + OPT_PARAM_NODES]
+    mov rbx, [r12 + OPT_STATE]
+    
+    ; Increment time step
+    inc qword [rbx+40]
+    
+    ; Load hyperparameters
+    movsd xmm4, [rel rbx]               ; lr
+    movsd xmm5, [rbx+8]             ; beta1
+    movsd xmm6, [rbx+16]            ; beta2
+    movsd xmm7, [rbx+24]            ; eps
+    movsd xmm8, [rbx+32]            ; weight_decay
+    mov rax, [rbx+40]               ; t
+    mov [rel rsp], rax
+    mov rax, [rbx+48]               ; m array
+    mov [rsp+8], rax
+    mov rax, [rbx+56]               ; v array
+    mov [rsp+16], rax
+    
+    ; Store hyperparams on stack for later use
+    movsd [rsp+24], xmm4
+    movsd [rsp+32], xmm5
+    movsd [rsp+40], xmm6
+    movsd [rsp+48], xmm7
+    movsd [rsp+56], xmm8
+    
+    ; Compute bias corrections: 1 - beta^t
+    ; bias1 = 1 - beta1^t
+    movsd xmm0, xmm5                ; beta1
+    cvtsi2sd xmm1, qword [rel rsp]      ; t
+    sub rsp, 8
+    call pow wrt ..plt
+    add rsp, 8
+    movsd xmm1, [rel one_f64]
+    subsd xmm1, xmm0
+    movsd [rsp+64], xmm1            ; 1 - beta1^t
+    
+    ; bias2 = 1 - beta2^t
+    movsd xmm0, [rsp+48]            ; beta2
+    cvtsi2sd xmm1, qword [rel rsp]      ; t
+    sub rsp, 8
+    call pow wrt ..plt
+    add rsp, 8
+    movsd xmm1, [rel one_f64]
+    subsd xmm1, xmm0
+    movsd [rsp+72], xmm1            ; 1 - beta2^t
+    
+    ; For each parameter
+    xor ecx, ecx
+.adamw_loop:
+    cmp ecx, r13d
+    jge .done
+    
+    mov [rsp+80], ecx               ; save index
+    
+    mov rax, [r14 + rcx*8]          ; param tensor
+    mov [rsp+88], rax
+    ; Get grad from param_nodes[rel i]->grad
+    mov rsi, [r15 + rcx*8]          ; param_node
+    test rsi, rsi
+    jz .adamw_next                  ; skip if null node
+    mov rsi, [rsi + NODE_GRAD]      ; node->grad tensor
+    test rsi, rsi
+    jz .adamw_next                  ; skip if null grad
+    mov [rsp+96], rsi
+    mov r8, [rsp+8]                 ; m array
+    mov rdx, [r8 + rcx*8]           ; m tensor
+    mov [rsp+104], rdx
+    mov r8, [rsp+16]                ; v array
+    mov rax, [r8 + rcx*8]           ; v tensor
+    mov [rsp+112], rax
+    
+    ; Get numel
+    mov rdi, [rsp+88]
+    call tensor_numel
+    mov r10, rax
+    
+    ; Get data pointers
+    mov rax, [rsp+88]
+    mov rdi, [rax + TENSOR_DATA]    ; param data
+    mov rax, [rsp+96]
+    mov r8, [rax + TENSOR_DATA]     ; grad data
+    mov rax, [rsp+104]
+    mov r9, [rax + TENSOR_DATA]     ; m data
+    mov rax, [rsp+112]
+    mov r11, [rax + TENSOR_DATA]    ; v data
+    
+    ; Check dtype
+    mov rax, [rsp+88]
+    mov eax, [rax + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT32
+    je .adamw_f32
+    
+    ; float64 AdamW update
+    movsd xmm5, [rsp+40]            ; beta1
+    movsd xmm6, [rsp+48]            ; beta2
+    movsd xmm9, [rsp+64]            ; weight_decay
+    
+    ; 1 - beta1, 1 - beta2
+    movsd xmm3, [rel one_f64]
+    movsd xmm2, xmm3
+    subsd xmm2, xmm5                ; 1 - beta1
+    movsd xmm1, xmm3
+    subsd xmm1, xmm6                ; 1 - beta2
+    
+    xor rcx, rcx
+.adamw_f64_loop:
+    cmp rcx, r10
+    jge .adamw_next
+    
+    ; m = beta1 * m + (1 - beta1) * grad
+    movsd xmm0, [r9 + rcx*8]        ; m
+    mulsd xmm0, xmm5                ; beta1 * m
+    movsd xmm4, [r8 + rcx*8]        ; grad
+    mulsd xmm4, xmm2                ; (1 - beta1) * grad
+    addsd xmm0, xmm4
+    movsd [r9 + rcx*8], xmm0        ; store m
+    
+    ; v = beta2 * v + (1 - beta2) * grad^2
+    movsd xmm0, [r11 + rcx*8]       ; v
+    mulsd xmm0, xmm6                ; beta2 * v
+    movsd xmm4, [r8 + rcx*8]        ; grad
+    mulsd xmm4, xmm4                ; grad^2
+    mulsd xmm4, xmm1                ; (1 - beta2) * grad^2
+    addsd xmm0, xmm4
+    movsd [r11 + rcx*8], xmm0       ; store v
+    
+    ; m_hat = m / (1 - beta1^t)
+    movsd xmm0, [r9 + rcx*8]
+    divsd xmm0, [rsp+72]
+    
+    ; v_hat = v / (1 - beta2^t)
+    movsd xmm4, [r11 + rcx*8]
+    divsd xmm4, [rsp+80]
+    
+    ; AdamW: param = param - lr * weight_decay * param - lr * m_hat / (sqrt(v_hat) + eps)
+    ; First apply weight decay: param = param * (1 - lr * weight_decay)
+    movsd xmm10, [rsp+32]           ; lr
+    mulsd xmm10, xmm9               ; lr * weight_decay
+    movsd xmm11, [rel one_f64]
+    subsd xmm11, xmm10              ; 1 - lr * weight_decay
+    movsd xmm12, [rdi + rcx*8]      ; param
+    mulsd xmm12, xmm11              ; param * (1 - lr * weight_decay)
+    
+    ; Then apply Adam update: param -= lr * m_hat / (sqrt(v_hat) + eps)
+    sqrtsd xmm4, xmm4
+    addsd xmm4, [rsp+56]            ; + eps
+    divsd xmm0, xmm4                ; m_hat / (sqrt(v_hat) + eps)
+    mulsd xmm0, [rsp+32]            ; * lr
+    subsd xmm12, xmm0               ; param - lr * adam_update
+    
+    movsd [rdi + rcx*8], xmm12
+    
+    inc rcx
+    jmp .adamw_f64_loop
+
+.adamw_f32:
+    ; Similar for float32
+    movsd xmm5, [rsp+40]
+    movsd xmm6, [rsp+48]
+    movsd xmm9, [rsp+64]
+    cvtsd2ss xmm5, xmm5
+    cvtsd2ss xmm6, xmm6
+    cvtsd2ss xmm9, xmm9
+    
+    mov eax, 0x3f800000             ; 1.0f
+    movd xmm3, eax
+    movaps xmm2, xmm3
+    subss xmm2, xmm5
+    movaps xmm1, xmm3
+    subss xmm1, xmm6
+    
+    xor rcx, rcx
+.adamw_f32_loop:
+    cmp rcx, r10
+    jge .adamw_next
+    
+    movss xmm0, [r9 + rcx*4]
+    mulss xmm0, xmm5
+    movss xmm4, [r8 + rcx*4]
+    mulss xmm4, xmm2
+    addss xmm0, xmm4
+    movss [r9 + rcx*4], xmm0
+    
+    movss xmm0, [r11 + rcx*4]
+    mulss xmm0, xmm6
+    movss xmm4, [r8 + rcx*4]
+    mulss xmm4, xmm4
+    mulss xmm4, xmm1
+    addss xmm0, xmm4
+    movss [r11 + rcx*4], xmm0
+    
+    movss xmm0, [r9 + rcx*4]
+    cvtss2sd xmm0, xmm0
+    divsd xmm0, [rsp+72]
+    cvtsd2ss xmm0, xmm0
+    
+    movss xmm4, [r11 + rcx*4]
+    cvtss2sd xmm4, xmm4
+    divsd xmm4, [rsp+80]
+    cvtsd2ss xmm4, xmm4
+    
+    ; AdamW for float32
+    movsd xmm10, [rsp+32]           ; lr
+    cvtsd2ss xmm10, xmm10
+    mulss xmm10, xmm9               ; lr * weight_decay
+    mov eax, 0x3f800000             ; 1.0f
+    movd xmm11, eax
+    subss xmm11, xmm10              ; 1 - lr * weight_decay
+    movss xmm12, [rdi + rcx*4]      ; param
+    mulss xmm12, xmm11              ; param * (1 - lr * weight_decay)
+    
+    ; Adam update
+    sqrtss xmm4, xmm4
+    movsd xmm7, [rsp+56]
+    cvtsd2ss xmm7, xmm7
+    addss xmm4, xmm7
+    divss xmm0, xmm4
+    movsd xmm7, [rsp+32]
+    cvtsd2ss xmm7, xmm7
+    mulss xmm0, xmm7
+    subss xmm12, xmm0
+    
+    movss [rdi + rcx*4], xmm12
+    
+    inc rcx
+    jmp .adamw_f32_loop
+
+.adamw_next:
+    mov ecx, [rsp+80]
+    inc ecx
+    jmp .adamw_loop
+
+.done:
+    add rsp, 120
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; adamw_zero_grad - Zero all gradients
+; Arguments:
+;   RDI = Optimizer* opt
+; =============================================================================
+adamw_zero_grad:
+    jmp sgd_zero_grad               ; Same implementation
 
 ; Mark stack as non-executable
 section .note.GNU-stack noalloc noexec nowrite progbits
