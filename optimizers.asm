@@ -1377,6 +1377,10 @@ clip_grad_norm_:
     mov r13d, [r12 + OPT_N_PARAMS]
     mov r14, [r12 + OPT_PARAM_NODES]
     
+    ; Check if optimizer has parameters
+    test r14, r14
+    jz .no_clipping_needed          ; no param_nodes, nothing to clip
+    
     ; First pass: compute total L2 norm of all gradients
     vxorpd xmm4, xmm4, xmm4         ; total_norm = 0.0
     
@@ -1530,6 +1534,10 @@ clip_grad_value_:
     
     mov r13d, [r12 + OPT_N_PARAMS]
     mov r14, [r12 + OPT_PARAM_NODES]
+    
+    ; Check if optimizer has parameters
+    test r14, r14
+    jz .value_clip_done             ; no param_nodes, nothing to clip
     
     xor ecx, ecx
 .value_clip_loop:

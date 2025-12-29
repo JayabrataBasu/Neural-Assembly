@@ -1571,6 +1571,12 @@ neural_sgd_create:
     push rbp
     mov rbp, rsp
     
+    ; Set up arguments for sgd_create: params=NULL, param_nodes=NULL, n_params=0
+    xor rdi, rdi                    ; params = NULL
+    xor rsi, rsi                    ; param_nodes = NULL
+    xor edx, edx                    ; n_params = 0
+    ; XMM0 and XMM1 already contain lr and momentum
+    
     call sgd_create
     
     test rax, rax
