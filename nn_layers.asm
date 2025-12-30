@@ -38,6 +38,31 @@
 ; 32      8       stride
 ; 40      8       padding
 
+; Activation config struct:
+; Offset  Size    Field
+; 0       4       activation_type
+; 4       4       padding
+; 8       8       alpha (for leaky_relu, elu, etc.)
+
+%define ACTIVATION_TYPE     0
+%define ACTIVATION_ALPHA    8
+
+; Activation type constants
+%define ACT_NONE            0
+%define ACT_RELU            1
+%define ACT_SIGMOID         2
+%define ACT_TANH            3
+%define ACT_SOFTMAX         4
+%define ACT_GELU            5
+%define ACT_LEAKY_RELU      6
+%define ACT_ELU             7
+%define ACT_SELU            8
+%define ACT_SWISH           9
+%define ACT_MISH            10
+%define ACT_HARDSWISH       11
+%define ACT_SOFTPLUS        12
+%define ACT_HARDTANH        13
+
 %define NODE_VALUE          0
 %define NODE_GRAD           8
 %define NODE_BACKWARD_FN    16
@@ -94,6 +119,21 @@ extern neural_linear_forward
 extern neural_linear_weight
 extern neural_linear_bias
 
+; Activation functions from autograd
+extern node_relu
+extern node_sigmoid
+extern node_tanh
+extern node_softmax
+extern node_gelu
+extern node_leaky_relu
+extern node_elu
+extern node_selu
+extern node_swish
+extern node_mish
+extern node_hardswish
+extern node_softplus
+extern node_hardtanh
+
 ; Export layer functions
 global linear_create
 global linear_forward
@@ -103,6 +143,23 @@ global conv2d_create
 global conv2d_forward
 global conv2d_forward_fn
 global conv2d_backward
+
+; Export activation layer functions
+global activation_create
+global activation_forward_fn
+global activation_relu_create
+global activation_sigmoid_create
+global activation_tanh_create
+global activation_softmax_create
+global activation_gelu_create
+global activation_leaky_relu_create
+global activation_elu_create
+global activation_selu_create
+global activation_swish_create
+global activation_mish_create
+global activation_hardswish_create
+global activation_softplus_create
+global activation_hardtanh_create
 global module_free
 global module_get_params
 
@@ -762,6 +819,389 @@ linear_backward:
     ret
 
 ; =============================================================================
+; Activation Module Implementation
+; =============================================================================
+
+; =============================================================================
+; activation_create - Create an activation layer module
+; Arguments:
+;   RDI = activation_type (ACT_RELU, ACT_SIGMOID, etc.)
+;   RSI = alpha (for leaky_relu, elu, etc.) - optional, pass 0 for defaults
+; Returns:
+;   RAX = Module* or NULL on error
+; =============================================================================
+activation_create:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 32
+    
+    mov r12d, edi                   ; activation type
+    movsd [rsp], xmm0               ; save alpha (passed in xmm0 for float params)
+    mov r13, rsi                    ; alpha as integer (or 0)
+    
+    ; Allocate module struct
+    mov rdi, MODULE_SIZE
+    mov rsi, 16
+    call mem_alloc_aligned
+    test rax, rax
+    jz .alloc_failed
+    mov r14, rax                    ; module
+    
+    ; Initialize module - no params for activation
+    mov dword [r14 + MODULE_N_PARAMS], 0
+    mov qword [r14 + MODULE_PARAMS], 0
+    mov qword [r14 + MODULE_PARAM_NODES], 0
+    
+    ; Allocate config
+    mov rdi, 16                     ; activation config size
+    call mem_alloc
+    test rax, rax
+    jz .alloc_config_failed
+    mov [r14 + MODULE_CONFIG], rax
+    mov [rax + ACTIVATION_TYPE], r12d
+    
+    ; Set alpha based on activation type
+    cmp r12d, ACT_LEAKY_RELU
+    je .set_leaky_alpha
+    cmp r12d, ACT_ELU
+    je .set_elu_alpha
+    ; Default: no alpha needed
+    mov qword [rax + ACTIVATION_ALPHA], 0
+    jmp .set_forward_fn
+    
+.set_leaky_alpha:
+    ; Default alpha for leaky relu: 0.01
+    test r13, r13
+    jnz .use_custom_alpha
+    mov rdi, 0x3F847AE147AE147B     ; 0.01 in double
+    mov [rax + ACTIVATION_ALPHA], rdi
+    jmp .set_forward_fn
+    
+.set_elu_alpha:
+    ; Default alpha for ELU: 1.0
+    test r13, r13
+    jnz .use_custom_alpha
+    mov rdi, 0x3FF0000000000000     ; 1.0 in double
+    mov [rax + ACTIVATION_ALPHA], rdi
+    jmp .set_forward_fn
+    
+.use_custom_alpha:
+    mov [rax + ACTIVATION_ALPHA], r13
+    
+.set_forward_fn:
+    ; Set forward function
+    lea rax, [rel activation_forward_fn]
+    mov [r14 + MODULE_FORWARD_FN], rax
+    
+    mov rax, r14
+    
+    add rsp, 32
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.alloc_config_failed:
+    mov rdi, r14
+    call mem_free
+.alloc_failed:
+    xor eax, eax
+    add rsp, 32
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; activation_forward_fn - Forward pass for activation layer (via function pointer)
+; Arguments:
+;   RDI = Module* self
+;   RSI = Node* input
+;   RDX = Node** output (pointer to store output Node*)
+; =============================================================================
+activation_forward_fn:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    sub rsp, 24
+    
+    mov r12, rdi                    ; module
+    mov r13, rsi                    ; input node
+    mov rbx, rdx                    ; output pointer
+    
+    ; Get activation type from config
+    mov rax, [r12 + MODULE_CONFIG]
+    mov eax, [rax + ACTIVATION_TYPE]
+    
+    ; Dispatch based on activation type
+    cmp eax, ACT_RELU
+    je .forward_relu
+    cmp eax, ACT_SIGMOID
+    je .forward_sigmoid
+    cmp eax, ACT_TANH
+    je .forward_tanh
+    cmp eax, ACT_SOFTMAX
+    je .forward_softmax
+    cmp eax, ACT_GELU
+    je .forward_gelu
+    cmp eax, ACT_LEAKY_RELU
+    je .forward_leaky_relu
+    cmp eax, ACT_ELU
+    je .forward_elu
+    cmp eax, ACT_SELU
+    je .forward_selu
+    cmp eax, ACT_SWISH
+    je .forward_swish
+    cmp eax, ACT_MISH
+    je .forward_mish
+    cmp eax, ACT_HARDSWISH
+    je .forward_hardswish
+    cmp eax, ACT_SOFTPLUS
+    je .forward_softplus
+    cmp eax, ACT_HARDTANH
+    je .forward_hardtanh
+    
+    ; Unknown activation - pass through
+    mov [rbx], r13
+    xor eax, eax
+    jmp .done
+    
+.forward_relu:
+    mov rdi, r13
+    call node_relu
+    mov [rbx], rax
+    xor eax, eax
+    jmp .done
+    
+.forward_sigmoid:
+    mov rdi, r13
+    call node_sigmoid
+    mov [rbx], rax
+    xor eax, eax
+    jmp .done
+    
+.forward_tanh:
+    mov rdi, r13
+    call node_tanh
+    mov [rbx], rax
+    xor eax, eax
+    jmp .done
+    
+.forward_softmax:
+    mov rdi, r13
+    call node_softmax
+    mov [rbx], rax
+    xor eax, eax
+    jmp .done
+    
+.forward_gelu:
+    mov rdi, r13
+    call node_gelu
+    mov [rbx], rax
+    xor eax, eax
+    jmp .done
+    
+.forward_leaky_relu:
+    mov rdi, r13
+    ; Get alpha from config
+    mov rax, [r12 + MODULE_CONFIG]
+    movsd xmm0, [rax + ACTIVATION_ALPHA]
+    call node_leaky_relu
+    mov [rbx], rax
+    xor eax, eax
+    jmp .done
+    
+.forward_elu:
+    mov rdi, r13
+    mov rax, [r12 + MODULE_CONFIG]
+    movsd xmm0, [rax + ACTIVATION_ALPHA]
+    call node_elu
+    mov [rbx], rax
+    xor eax, eax
+    jmp .done
+    
+.forward_selu:
+    mov rdi, r13
+    call node_selu
+    mov [rbx], rax
+    xor eax, eax
+    jmp .done
+    
+.forward_swish:
+    mov rdi, r13
+    call node_swish
+    mov [rbx], rax
+    xor eax, eax
+    jmp .done
+    
+.forward_mish:
+    mov rdi, r13
+    call node_mish
+    mov [rbx], rax
+    xor eax, eax
+    jmp .done
+    
+.forward_hardswish:
+    mov rdi, r13
+    call node_hardswish
+    mov [rbx], rax
+    xor eax, eax
+    jmp .done
+    
+.forward_softplus:
+    mov rdi, r13
+    call node_softplus
+    mov [rbx], rax
+    xor eax, eax
+    jmp .done
+    
+.forward_hardtanh:
+    mov rdi, r13
+    call node_hardtanh
+    mov [rbx], rax
+    xor eax, eax
+    jmp .done
+    
+.done:
+    add rsp, 24
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; Convenience functions to create specific activation layers
+; =============================================================================
+
+activation_relu_create:
+    push rbp
+    mov rbp, rsp
+    mov edi, ACT_RELU
+    xor esi, esi
+    call activation_create
+    pop rbp
+    ret
+
+activation_sigmoid_create:
+    push rbp
+    mov rbp, rsp
+    mov edi, ACT_SIGMOID
+    xor esi, esi
+    call activation_create
+    pop rbp
+    ret
+
+activation_tanh_create:
+    push rbp
+    mov rbp, rsp
+    mov edi, ACT_TANH
+    xor esi, esi
+    call activation_create
+    pop rbp
+    ret
+
+activation_softmax_create:
+    push rbp
+    mov rbp, rsp
+    mov edi, ACT_SOFTMAX
+    xor esi, esi
+    call activation_create
+    pop rbp
+    ret
+
+activation_gelu_create:
+    push rbp
+    mov rbp, rsp
+    mov edi, ACT_GELU
+    xor esi, esi
+    call activation_create
+    pop rbp
+    ret
+
+activation_leaky_relu_create:
+    push rbp
+    mov rbp, rsp
+    mov edi, ACT_LEAKY_RELU
+    xor esi, esi                    ; use default alpha
+    call activation_create
+    pop rbp
+    ret
+
+activation_elu_create:
+    push rbp
+    mov rbp, rsp
+    mov edi, ACT_ELU
+    xor esi, esi                    ; use default alpha
+    call activation_create
+    pop rbp
+    ret
+
+activation_selu_create:
+    push rbp
+    mov rbp, rsp
+    mov edi, ACT_SELU
+    xor esi, esi
+    call activation_create
+    pop rbp
+    ret
+
+activation_swish_create:
+    push rbp
+    mov rbp, rsp
+    mov edi, ACT_SWISH
+    xor esi, esi
+    call activation_create
+    pop rbp
+    ret
+
+activation_mish_create:
+    push rbp
+    mov rbp, rsp
+    mov edi, ACT_MISH
+    xor esi, esi
+    call activation_create
+    pop rbp
+    ret
+
+activation_hardswish_create:
+    push rbp
+    mov rbp, rsp
+    mov edi, ACT_HARDSWISH
+    xor esi, esi
+    call activation_create
+    pop rbp
+    ret
+
+activation_softplus_create:
+    push rbp
+    mov rbp, rsp
+    mov edi, ACT_SOFTPLUS
+    xor esi, esi
+    call activation_create
+    pop rbp
+    ret
+
+activation_hardtanh_create:
+    push rbp
+    mov rbp, rsp
+    mov edi, ACT_HARDTANH
+    xor esi, esi
+    call activation_create
+    pop rbp
+    ret
+
+; =============================================================================
 ; conv2d_create - Create a Conv2d layer (placeholder - basic implementation)
 ; Arguments:
 ;   RDI = in_channels
@@ -1041,14 +1481,20 @@ module_get_params:
 
 ; Sequential struct layout:
 ; Offset  Size    Field
-; 0       8       capacity    (uint64_t) - allocated capacity
-; 8       8       size        (uint64_t) - number of modules
-; 16      8       modules     (NeuralLinear**) - array of module pointers
+; 0       8       capacity         (uint64_t) - allocated capacity
+; 8       8       size             (uint64_t) - number of modules
+; 16      8       modules          (NeuralLinear**) - array of module pointers
+; 24      8       intermediates    (Node**) - array of intermediate outputs
+; 32      8       inter_capacity   (uint64_t) - intermediate array capacity
+; 40      1       save_inter       (uint8_t) - flag to save intermediates
 
-%define SEQUENTIAL_CAPACITY  0
-%define SEQUENTIAL_SIZE      8
-%define SEQUENTIAL_MODULES   16
-%define SEQUENTIAL_SIZE_BYTES 24
+%define SEQUENTIAL_CAPACITY       0
+%define SEQUENTIAL_SIZE           8
+%define SEQUENTIAL_MODULES        16
+%define SEQUENTIAL_INTERMEDIATES  24
+%define SEQUENTIAL_INTER_CAP      32
+%define SEQUENTIAL_SAVE_INTER     40
+%define SEQUENTIAL_SIZE_BYTES     48
 
 ; Export sequential functions
 global neural_sequential_create
@@ -1058,6 +1504,9 @@ global neural_sequential_forward
 global neural_sequential_size
 global neural_sequential_get
 global neural_sequential_parameters
+global neural_sequential_get_intermediate
+global neural_sequential_set_save_intermediates
+global neural_sequential_clear_intermediates
 
 ; =============================================================================
 ; neural_sequential_create - Create a sequential container
@@ -1092,6 +1541,9 @@ neural_sequential_create:
     mov qword [r12 + SEQUENTIAL_SIZE], 0
     mov qword [r12 + SEQUENTIAL_CAPACITY], 0
     mov qword [r12 + SEQUENTIAL_MODULES], 0
+    mov qword [r12 + SEQUENTIAL_INTERMEDIATES], 0
+    mov qword [r12 + SEQUENTIAL_INTER_CAP], 0
+    mov byte [r12 + SEQUENTIAL_SAVE_INTER], 0
     
     ; If modules provided, add them
     test r14, r14
@@ -1181,6 +1633,12 @@ neural_sequential_free:
     
 .free_array:
     mov rdi, [r12 + SEQUENTIAL_MODULES]
+    call mem_free
+    
+    ; Free intermediates array if exists
+    mov rdi, [r12 + SEQUENTIAL_INTERMEDIATES]
+    test rdi, rdi
+    jz .free_struct
     call mem_free
     
 .free_struct:
@@ -1316,7 +1774,7 @@ neural_sequential_forward:
     push r13
     push r14
     push r15
-    sub rsp, 16                     ; space for intermediate tensor
+    sub rsp, 32                     ; space for intermediate storage
     
     test rdi, rdi
     jz .error_null
@@ -1334,7 +1792,45 @@ neural_sequential_forward:
     test rax, rax
     jz .error_empty
     
+    ; Check if we need to allocate intermediates array
+    mov al, [r12 + SEQUENTIAL_SAVE_INTER]
+    test al, al
+    jz .skip_inter_alloc
+    
+    ; Ensure intermediates array is large enough
+    mov rax, [r12 + SEQUENTIAL_SIZE]
+    cmp rax, [r12 + SEQUENTIAL_INTER_CAP]
+    jle .skip_inter_alloc
+    
+    ; Allocate/resize intermediates array
+    push r12
+    push r13
+    push r14
+    mov rdi, rax
+    shl rdi, 3                      ; 8 bytes per pointer
+    call mem_alloc
+    pop r14
+    pop r13
+    pop r12
+    test rax, rax
+    jz .error_memory
+    
+    ; Free old array if exists
+    mov rdi, [r12 + SEQUENTIAL_INTERMEDIATES]
+    test rdi, rdi
+    jz .store_new_inter
+    push rax
+    call mem_free
+    pop rax
+    
+.store_new_inter:
+    mov [r12 + SEQUENTIAL_INTERMEDIATES], rax
+    mov rcx, [r12 + SEQUENTIAL_SIZE]
+    mov [r12 + SEQUENTIAL_INTER_CAP], rcx
+    
+.skip_inter_alloc:
     ; For single module, forward directly to output
+    mov rax, [r12 + SEQUENTIAL_SIZE]
     cmp rax, 1
     je .single_module
     
@@ -1352,6 +1848,7 @@ neural_sequential_forward:
     ; Get current module
     mov rcx, [r12 + SEQUENTIAL_MODULES]
     mov rdi, [rcx + rbx*8]          ; module
+    mov [rsp], rdi                  ; save module pointer
     
     ; Determine output tensor
     mov rax, [r12 + SEQUENTIAL_SIZE]
@@ -1361,21 +1858,42 @@ neural_sequential_forward:
     
     ; Use intermediate tensor (for now, assume caller handles this)
     ; This is a limitation - proper implementation would need intermediate tensors
+    mov rdi, [rsp]                  ; restore module pointer
     mov rsi, r15                    ; input
     mov rdx, r14                    ; output (temporary)
     call [rdi + MODULE_FORWARD_FN]
     test eax, eax
     jnz .error
     
+    ; Save intermediate if enabled
+    mov al, [r12 + SEQUENTIAL_SAVE_INTER]
+    test al, al
+    jz .no_save_inter
+    mov rcx, [r12 + SEQUENTIAL_INTERMEDIATES]
+    test rcx, rcx
+    jz .no_save_inter
+    mov [rcx + rbx*8], r14          ; save output node/tensor pointer
+    
+.no_save_inter:
     mov r15, r14                    ; next input is current output
     jmp .next
     
 .use_final_output:
+    mov rdi, [rsp]                  ; restore module pointer
     mov rsi, r15                    ; input
     mov rdx, r14                    ; final output
     call [rdi + MODULE_FORWARD_FN]
     test eax, eax
     jnz .error
+    
+    ; Save final output as intermediate too if enabled
+    mov al, [r12 + SEQUENTIAL_SAVE_INTER]
+    test al, al
+    jz .next
+    mov rcx, [r12 + SEQUENTIAL_INTERMEDIATES]
+    test rcx, rcx
+    jz .next
+    mov [rcx + rbx*8], r14
     
 .next:
     inc rbx
@@ -1390,9 +1908,29 @@ neural_sequential_forward:
     test eax, eax
     jnz .error
     
+    ; Save intermediate if enabled
+    mov al, [r12 + SEQUENTIAL_SAVE_INTER]
+    test al, al
+    jz .done
+    mov rcx, [r12 + SEQUENTIAL_INTERMEDIATES]
+    test rcx, rcx
+    jz .done
+    mov qword [rcx], r14            ; save single output
+    
 .done:
     xor eax, eax
-    add rsp, 16
+    add rsp, 32
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+.error_memory:
+    mov eax, 2                      ; NEURAL_ERR_OUT_OF_MEMORY
+    add rsp, 32
     pop r15
     pop r14
     pop r13
@@ -1403,7 +1941,7 @@ neural_sequential_forward:
 
 .error_empty:
     mov eax, 3                      ; NEURAL_ERR_INVALID_ARGUMENT
-    add rsp, 16
+    add rsp, 32
     pop r15
     pop r14
     pop r13
@@ -1414,7 +1952,7 @@ neural_sequential_forward:
 
 .error_null:
     mov eax, 1                      ; NEURAL_ERR_NULL_POINTER
-    add rsp, 16
+    add rsp, 32
     pop r15
     pop r14
     pop r13
@@ -1570,6 +2108,104 @@ neural_sequential_parameters:
     pop r15
     pop r14
     pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_sequential_get_intermediate - Get intermediate output at index
+; Arguments:
+;   RDI = NeuralSequential* seq
+;   RSI = uint64_t index
+; Returns:
+;   RAX = intermediate output pointer (Node* or Tensor*) or NULL
+; =============================================================================
+neural_sequential_get_intermediate:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .null_inter
+    
+    ; Check if intermediates are enabled
+    mov al, [rdi + SEQUENTIAL_SAVE_INTER]
+    test al, al
+    jz .null_inter
+    
+    ; Check bounds
+    cmp rsi, [rdi + SEQUENTIAL_SIZE]
+    jge .null_inter
+    
+    ; Check if array exists
+    mov rcx, [rdi + SEQUENTIAL_INTERMEDIATES]
+    test rcx, rcx
+    jz .null_inter
+    
+    ; Return intermediate at index
+    mov rax, [rcx + rsi*8]
+    pop rbp
+    ret
+    
+.null_inter:
+    xor eax, eax
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_sequential_set_save_intermediates - Enable/disable saving intermediates
+; Arguments:
+;   RDI = NeuralSequential* seq
+;   RSI = uint8_t enable (0 = disable, non-zero = enable)
+; Returns:
+;   nothing
+; =============================================================================
+neural_sequential_set_save_intermediates:
+    push rbp
+    mov rbp, rsp
+    
+    test rdi, rdi
+    jz .done_save_inter
+    
+    mov [rdi + SEQUENTIAL_SAVE_INTER], sil
+    
+.done_save_inter:
+    pop rbp
+    ret
+
+; =============================================================================
+; neural_sequential_clear_intermediates - Clear saved intermediate outputs
+; Arguments:
+;   RDI = NeuralSequential* seq
+; Returns:
+;   nothing
+; =============================================================================
+neural_sequential_clear_intermediates:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    
+    test rdi, rdi
+    jz .done_clear_inter
+    
+    mov r12, rdi
+    
+    ; Get intermediates array
+    mov rbx, [r12 + SEQUENTIAL_INTERMEDIATES]
+    test rbx, rbx
+    jz .done_clear_inter
+    
+    ; Zero out all entries
+    xor rcx, rcx
+.clear_loop:
+    cmp rcx, [r12 + SEQUENTIAL_SIZE]
+    jge .done_clear_inter
+    mov qword [rbx + rcx*8], 0
+    inc rcx
+    jmp .clear_loop
+    
+.done_clear_inter:
     pop r12
     pop rbx
     pop rbp

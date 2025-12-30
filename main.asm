@@ -30,6 +30,63 @@ section .data
     ; Sequential parsing
     seq_prefix:     db "Sequential(", 0
     
+    ; Activation names for parsing
+    act_relu:       db "relu", 0
+    act_sigmoid:    db "sigmoid", 0
+    act_tanh:       db "tanh", 0
+    act_softmax:    db "softmax", 0
+    act_gelu:       db "gelu", 0
+    act_leaky_relu: db "leaky_relu", 0
+    act_elu:        db "elu", 0
+    act_selu:       db "selu", 0
+    act_swish:      db "swish", 0
+    act_mish:       db "mish", 0
+    act_hardswish:  db "hardswish", 0
+    act_softplus:   db "softplus", 0
+    act_hardtanh:   db "hardtanh", 0
+    
+    ; Layer type names for full syntax
+    layer_linear:   db "Linear", 0
+    layer_relu:     db "ReLU", 0
+    layer_sigmoid:  db "Sigmoid", 0
+    layer_tanh:     db "Tanh", 0
+    layer_softmax:  db "Softmax", 0
+    layer_gelu:     db "GELU", 0
+    layer_leaky_relu: db "LeakyReLU", 0
+    layer_elu:      db "ELU", 0
+    layer_selu:     db "SELU", 0
+    layer_swish:    db "Swish", 0
+    layer_mish:     db "Mish", 0
+    layer_hardswish: db "HardSwish", 0
+    layer_softplus: db "Softplus", 0
+    layer_hardtanh: db "HardTanh", 0
+    layer_dropout:  db "Dropout", 0
+    layer_batchnorm: db "BatchNorm", 0
+    layer_flatten:  db "Flatten", 0
+    
+    ; Layer type constants
+    LAYER_LINEAR    equ 1
+    LAYER_ACTIVATION equ 2
+    LAYER_DROPOUT   equ 3
+    LAYER_BATCHNORM equ 4
+    LAYER_FLATTEN   equ 5
+    
+    ; Activation type constants (must match nn_layers.asm)
+    ACT_NONE        equ 0
+    ACT_RELU        equ 1
+    ACT_SIGMOID     equ 2
+    ACT_TANH        equ 3
+    ACT_SOFTMAX     equ 4
+    ACT_GELU        equ 5
+    ACT_LEAKY_RELU  equ 6
+    ACT_ELU         equ 7
+    ACT_SELU        equ 8
+    ACT_SWISH       equ 9
+    ACT_MISH        equ 10
+    ACT_HARDSWISH   equ 11
+    ACT_SOFTPLUS    equ 12
+    ACT_HARDTANH    equ 13
+    
     ; Status messages
     msg_loading:    db "[*] Loading configuration...", 10, 0
     msg_config_ok:  db "[+] Configuration loaded successfully", 10, 0
@@ -191,6 +248,25 @@ section .text
     extern neural_sequential_size
     extern neural_sequential_get
     extern neural_sequential_parameters
+    extern neural_sequential_get_intermediate
+    extern neural_sequential_set_save_intermediates
+    extern neural_sequential_clear_intermediates
+    
+    ; Activation layers
+    extern activation_create
+    extern activation_relu_create
+    extern activation_sigmoid_create
+    extern activation_tanh_create
+    extern activation_softmax_create
+    extern activation_gelu_create
+    extern activation_leaky_relu_create
+    extern activation_elu_create
+    extern activation_selu_create
+    extern activation_swish_create
+    extern activation_mish_create
+    extern activation_hardswish_create
+    extern activation_softplus_create
+    extern activation_hardtanh_create
     
     ; Losses
     extern mse_loss
@@ -1096,6 +1172,11 @@ count_parameters:
 ;   rsi - config pointer
 ; Returns:
 ;   rax - model pointer (Sequential or legacy)
+;
+; Supports three formats:
+;   1. Simple: "2,8,1" - creates Linear layers between sizes
+;   2. With activations: "2,relu,8,sigmoid,1" - inserts activation after linear
+;   3. Full syntax: "Sequential(Linear(2,8), ReLU(), Linear(8,1))"
 parse_architecture:
     push rbp
     mov rbp, rsp
@@ -1110,37 +1191,39 @@ parse_architecture:
     mov r14, rsi                ; config pointer
     
     ; Check if it starts with "Sequential("
+    mov rdi, r12
     lea rsi, [rel seq_prefix]
     mov ecx, 11                 ; length of "Sequential("
     call str_starts_with
     test eax, eax
     jz .parse_legacy            ; not Sequential, try legacy format
     
-    ; Parse Sequential format
-    ; For now, just create a simple Sequential with Linear layers
-    ; TODO: Implement full Sequential parsing
+    ; Skip "Sequential("
+    add r12, 11
     
-    ; Create Sequential container
-    call neural_sequential_create
-    test rax, rax
-    jz .parse_error
-    
-    mov r13, rax                ; sequential pointer
-    
-    ; For now, parse comma-separated numbers and create Linear layers
-    ; This is a temporary implementation
+    ; Check if this is full syntax (contains "Linear(") or simple
     mov rdi, r12
-    add rdi, 11                 ; skip "Sequential("
+    lea rsi, [rel layer_linear]
+    mov ecx, 6                  ; length of "Linear"
+    call str_contains
+    test eax, eax
+    jnz .parse_full_syntax
+    
+    ; Simple syntax - parse comma-separated numbers with optional activations
+    mov rdi, r12
     mov rsi, r14                ; config pointer
     call parse_layer_sizes
+    jmp .parse_done
     
-    ; TODO: Parse actual module specifications
-    
-    mov rax, r13
+.parse_full_syntax:
+    ; Full syntax parsing: Sequential(Linear(2,8), ReLU(), Linear(8,1))
+    mov rdi, r12
+    mov rsi, r14                ; config pointer
+    call parse_full_architecture
     jmp .parse_done
     
 .parse_legacy:
-    ; Parse comma-separated layer sizes
+    ; Parse comma-separated layer sizes (simple format without Sequential prefix)
     mov rdi, r12
     mov rsi, r14                ; config pointer
     call parse_layer_sizes
@@ -1159,12 +1242,518 @@ parse_architecture:
     pop rbp
     ret
 
-; parse_layer_sizes - Parse comma-separated layer sizes
+; str_contains - Check if string contains substring
 ; Arguments:
-;   rdi - string like "10,64,64,10"
+;   rdi - string to search
+;   rsi - substring to find
+;   ecx - substring length
+; Returns:
+;   eax - 1 if contains, 0 otherwise
+str_contains:
+    push rbx
+    push r12
+    push r13
+    
+    mov r12, rdi                ; string
+    mov r13, rsi                ; substring
+    mov ebx, ecx                ; substring length
+    
+.search_loop:
+    mov al, [r12]
+    test al, al
+    jz .not_found
+    
+    ; Try to match at this position
+    push r12
+    mov rdi, r12
+    mov rsi, r13
+    mov ecx, ebx
+    call str_starts_with
+    pop r12
+    
+    test eax, eax
+    jnz .found
+    
+    inc r12
+    jmp .search_loop
+    
+.found:
+    mov eax, 1
+    pop r13
+    pop r12
+    pop rbx
+    ret
+    
+.not_found:
+    xor eax, eax
+    pop r13
+    pop r12
+    pop rbx
+    ret
+
+; parse_full_architecture - Parse full architecture syntax
+; Arguments:
+;   rdi - string after "Sequential(" like "Linear(2,8), ReLU(), Linear(8,1))"
+;   rsi - config pointer
+; Returns:
+;   rax - Sequential model pointer
+parse_full_architecture:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 128
+    
+    mov r12, rdi                ; string pointer
+    mov r15, rsi                ; config pointer
+    mov qword [rbp - 72], 0     ; first in_features (for config)
+    mov qword [rbp - 80], 0     ; last out_features (for config)
+    mov qword [rbp - 88], 0     ; layer count
+    
+    ; Create Sequential container
+    xor edi, edi
+    xor esi, esi
+    call neural_sequential_create
+    test rax, rax
+    jz .full_parse_error
+    mov r13, rax                ; sequential pointer
+    
+.parse_module_loop:
+    ; Skip whitespace and commas
+    call skip_whitespace_and_comma
+    
+    ; Check for end
+    mov al, [r12]
+    test al, al
+    jz .full_parse_done
+    cmp al, ')'
+    je .full_parse_done
+    
+    ; Extract layer type name
+    lea rdi, [rbp - 64]         ; token buffer
+    xor ecx, ecx
+.extract_layer_name:
+    mov al, [r12]
+    test al, al
+    jz .layer_name_done
+    cmp al, '('
+    je .layer_name_done
+    cmp al, ' '
+    je .layer_name_done
+    cmp al, ','
+    je .layer_name_done
+    cmp ecx, 30
+    jge .layer_name_done
+    mov [rdi + rcx], al
+    inc r12
+    inc ecx
+    jmp .extract_layer_name
+    
+.layer_name_done:
+    mov byte [rdi + rcx], 0     ; null terminate
+    
+    ; Skip to opening paren
+    mov al, [r12]
+    cmp al, '('
+    jne .skip_to_paren
+    jmp .have_paren
+    
+.skip_to_paren:
+    mov al, [r12]
+    test al, al
+    jz .full_parse_done
+    cmp al, '('
+    je .have_paren
+    inc r12
+    jmp .skip_to_paren
+    
+.have_paren:
+    inc r12                     ; skip '('
+    
+    ; Match layer type and create
+    push r12
+    push r13
+    lea rdi, [rbp - 64]         ; layer name
+    call match_layer_type
+    pop r13
+    pop r12
+    
+    mov [rbp - 96], eax         ; save layer type
+    
+    cmp eax, LAYER_LINEAR
+    je .create_linear
+    cmp eax, LAYER_ACTIVATION
+    je .create_activation_layer
+    ; Unknown layer type, skip to closing paren
+    jmp .skip_to_close_paren
+    
+.create_linear:
+    ; Parse parameters: in_features, out_features
+    mov rdi, r12
+    call parse_int_from_str
+    mov r12, rdi
+    mov r14d, eax               ; in_features
+    
+    ; Skip comma
+    call skip_whitespace_and_comma
+    
+    ; Parse out_features
+    mov rdi, r12
+    call parse_int_from_str
+    mov r12, rdi
+    mov ebx, eax                ; out_features
+    
+    ; Update config if this is the first/last layer
+    cmp qword [rbp - 72], 0
+    jnz .not_first_linear
+    mov [rbp - 72], r14         ; first in_features
+.not_first_linear:
+    mov [rbp - 80], rbx         ; update last out_features
+    inc qword [rbp - 88]        ; layer count
+    
+    ; Create Linear layer
+    push r12
+    push r13
+    push rbx
+    mov edi, r14d               ; in_features
+    mov esi, ebx                ; out_features
+    xor edx, edx                ; dtype = DT_FLOAT32
+    call linear_create
+    pop rbx
+    pop r13
+    pop r12
+    
+    test rax, rax
+    jz .skip_to_close_paren
+    
+    ; Add to sequential
+    push r12
+    push r13
+    mov rdi, r13                ; sequential
+    mov rsi, rax                ; linear layer
+    call neural_sequential_add
+    pop r13
+    pop r12
+    jmp .skip_to_close_paren
+    
+.create_activation_layer:
+    ; Get activation type from match
+    mov eax, [rbp - 104]        ; activation type stored by match_layer_type
+    
+    ; Create activation layer
+    push r12
+    push r13
+    mov edi, eax                ; activation type
+    xor esi, esi                ; default alpha
+    call activation_create
+    pop r13
+    pop r12
+    
+    test rax, rax
+    jz .skip_to_close_paren
+    
+    ; Add to sequential
+    push r12
+    push r13
+    mov rdi, r13                ; sequential
+    mov rsi, rax                ; activation layer
+    call neural_sequential_add
+    pop r13
+    pop r12
+    jmp .skip_to_close_paren
+    
+.skip_to_close_paren:
+    ; Find closing paren
+    mov ecx, 1                  ; paren depth
+.find_close:
+    mov al, [r12]
+    test al, al
+    jz .full_parse_done
+    cmp al, '('
+    je .inc_depth
+    cmp al, ')'
+    je .dec_depth
+    inc r12
+    jmp .find_close
+    
+.inc_depth:
+    inc ecx
+    inc r12
+    jmp .find_close
+    
+.dec_depth:
+    dec ecx
+    inc r12
+    test ecx, ecx
+    jnz .find_close
+    
+    ; Continue to next module
+    jmp .parse_module_loop
+    
+.full_parse_done:
+    ; Update config with parsed values
+    mov eax, [rbp - 72]         ; input_size
+    mov [r15 + OFF_INPUT_SIZE], eax
+    mov eax, [rbp - 80]         ; output_size
+    mov [r15 + OFF_OUTPUT_SIZE], eax
+    mov eax, [rbp - 88]
+    mov [r15 + OFF_NUM_LAYERS], eax
+    
+    mov rax, r13
+    add rsp, 128
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+    
+.full_parse_error:
+    xor eax, eax
+    add rsp, 128
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; Helper to skip whitespace and commas inline
+; Uses r12 as string pointer (modifies it)
+skip_whitespace_and_comma:
+.skip_loop:
+    mov al, [r12]
+    test al, al
+    jz .skip_done
+    cmp al, ' '
+    je .skip_next
+    cmp al, ','
+    je .skip_next
+    cmp al, 9                   ; tab
+    je .skip_next
+    cmp al, 10                  ; newline
+    je .skip_next
+    jmp .skip_done
+.skip_next:
+    inc r12
+    jmp .skip_loop
+.skip_done:
+    ret
+
+; match_layer_type - Match layer name to type and activation
+; Arguments:
+;   rdi - layer name string
+; Returns:
+;   eax - layer type (LAYER_LINEAR, LAYER_ACTIVATION, etc.)
+;   stores activation type at [rbp - 104] if LAYER_ACTIVATION
+match_layer_type:
+    push rbx
+    push r12
+    push r13
+    
+    mov r12, rdi
+    
+    ; Check for Linear
+    mov rdi, r12
+    lea rsi, [rel layer_linear]
+    call str_equal
+    test eax, eax
+    jnz .is_linear
+    
+    ; Check for activation layers
+    mov rdi, r12
+    lea rsi, [rel layer_relu]
+    call str_equal
+    test eax, eax
+    jnz .is_act_relu
+    
+    mov rdi, r12
+    lea rsi, [rel layer_sigmoid]
+    call str_equal
+    test eax, eax
+    jnz .is_act_sigmoid
+    
+    mov rdi, r12
+    lea rsi, [rel layer_tanh]
+    call str_equal
+    test eax, eax
+    jnz .is_act_tanh
+    
+    mov rdi, r12
+    lea rsi, [rel layer_softmax]
+    call str_equal
+    test eax, eax
+    jnz .is_act_softmax
+    
+    mov rdi, r12
+    lea rsi, [rel layer_gelu]
+    call str_equal
+    test eax, eax
+    jnz .is_act_gelu
+    
+    mov rdi, r12
+    lea rsi, [rel layer_leaky_relu]
+    call str_equal
+    test eax, eax
+    jnz .is_act_leaky_relu
+    
+    mov rdi, r12
+    lea rsi, [rel layer_elu]
+    call str_equal
+    test eax, eax
+    jnz .is_act_elu
+    
+    mov rdi, r12
+    lea rsi, [rel layer_selu]
+    call str_equal
+    test eax, eax
+    jnz .is_act_selu
+    
+    mov rdi, r12
+    lea rsi, [rel layer_swish]
+    call str_equal
+    test eax, eax
+    jnz .is_act_swish
+    
+    mov rdi, r12
+    lea rsi, [rel layer_mish]
+    call str_equal
+    test eax, eax
+    jnz .is_act_mish
+    
+    mov rdi, r12
+    lea rsi, [rel layer_hardswish]
+    call str_equal
+    test eax, eax
+    jnz .is_act_hardswish
+    
+    mov rdi, r12
+    lea rsi, [rel layer_softplus]
+    call str_equal
+    test eax, eax
+    jnz .is_act_softplus
+    
+    mov rdi, r12
+    lea rsi, [rel layer_hardtanh]
+    call str_equal
+    test eax, eax
+    jnz .is_act_hardtanh
+    
+    ; Also check lowercase activations
+    mov rdi, r12
+    lea rsi, [rel act_relu]
+    call str_equal
+    test eax, eax
+    jnz .is_act_relu
+    
+    mov rdi, r12
+    lea rsi, [rel act_sigmoid]
+    call str_equal
+    test eax, eax
+    jnz .is_act_sigmoid
+    
+    mov rdi, r12
+    lea rsi, [rel act_tanh]
+    call str_equal
+    test eax, eax
+    jnz .is_act_tanh
+    
+    ; Unknown layer type
+    xor eax, eax
+    jmp .match_layer_done
+    
+.is_linear:
+    mov eax, LAYER_LINEAR
+    jmp .match_layer_done
+    
+.is_act_relu:
+    mov dword [rbp - 104], ACT_RELU
+    mov eax, LAYER_ACTIVATION
+    jmp .match_layer_done
+    
+.is_act_sigmoid:
+    mov dword [rbp - 104], ACT_SIGMOID
+    mov eax, LAYER_ACTIVATION
+    jmp .match_layer_done
+    
+.is_act_tanh:
+    mov dword [rbp - 104], ACT_TANH
+    mov eax, LAYER_ACTIVATION
+    jmp .match_layer_done
+    
+.is_act_softmax:
+    mov dword [rbp - 104], ACT_SOFTMAX
+    mov eax, LAYER_ACTIVATION
+    jmp .match_layer_done
+    
+.is_act_gelu:
+    mov dword [rbp - 104], ACT_GELU
+    mov eax, LAYER_ACTIVATION
+    jmp .match_layer_done
+    
+.is_act_leaky_relu:
+    mov dword [rbp - 104], ACT_LEAKY_RELU
+    mov eax, LAYER_ACTIVATION
+    jmp .match_layer_done
+    
+.is_act_elu:
+    mov dword [rbp - 104], ACT_ELU
+    mov eax, LAYER_ACTIVATION
+    jmp .match_layer_done
+    
+.is_act_selu:
+    mov dword [rbp - 104], ACT_SELU
+    mov eax, LAYER_ACTIVATION
+    jmp .match_layer_done
+    
+.is_act_swish:
+    mov dword [rbp - 104], ACT_SWISH
+    mov eax, LAYER_ACTIVATION
+    jmp .match_layer_done
+    
+.is_act_mish:
+    mov dword [rbp - 104], ACT_MISH
+    mov eax, LAYER_ACTIVATION
+    jmp .match_layer_done
+    
+.is_act_hardswish:
+    mov dword [rbp - 104], ACT_HARDSWISH
+    mov eax, LAYER_ACTIVATION
+    jmp .match_layer_done
+    
+.is_act_softplus:
+    mov dword [rbp - 104], ACT_SOFTPLUS
+    mov eax, LAYER_ACTIVATION
+    jmp .match_layer_done
+    
+.is_act_hardtanh:
+    mov dword [rbp - 104], ACT_HARDTANH
+    mov eax, LAYER_ACTIVATION
+    jmp .match_layer_done
+    
+.match_layer_done:
+    pop r13
+    pop r12
+    pop rbx
+    ret
+
+; parse_layer_sizes - Parse comma-separated layer sizes with optional activations
+; Arguments:
+;   rdi - string like "10,64,relu,64,sigmoid,10" or "10,64,64,10"
 ;   rsi - config pointer
 ; Returns:
 ;   rax - model pointer
+; 
+; Enhanced syntax supports:
+;   - Numbers only: "2,8,1" creates Linear layers with no activations
+;   - With activations: "2,relu,8,sigmoid,1" inserts activation after linear
+;   - Supported activations: relu, sigmoid, tanh, softmax, gelu, leaky_relu, 
+;                            elu, selu, swish, mish, hardswish, softplus, hardtanh
 parse_layer_sizes:
     push rbp
     mov rbp, rsp
@@ -1173,15 +1762,33 @@ parse_layer_sizes:
     push r13
     push r14
     push r15
-    sub rsp, 96
+    sub rsp, 192                ; increased stack for tokens
+    
+    ; Layout:
+    ; [rbp-80]  = layer sizes array (up to 8 layers, 32 bytes)
+    ; [rbp-112] = activation types after each linear (up to 8, 32 bytes)
+    ; [rbp-144] = token buffer (32 bytes)
+    ; [rbp-176] = saved registers area
     
     mov r12, rdi                ; string pointer
     mov r15, rsi                ; config pointer
-    lea r13, [rbp - 80]         ; layer sizes array (up to 8 layers)
-    xor r14d, r14d              ; layer count
+    lea r13, [rbp - 80]         ; layer sizes array
+    lea rbx, [rbp - 112]        ; activation types array
+    xor r14d, r14d              ; layer count (number sizes)
+    
+    ; Initialize activation types to ACT_NONE
+    mov ecx, 8
+    lea rdi, [rbp - 112]
+.init_act_loop:
+    mov dword [rdi], ACT_NONE
+    add rdi, 4
+    dec ecx
+    jnz .init_act_loop
+    
+    mov qword [rbp - 176], 0    ; current activation index
     
 .parse_loop:
-    ; Skip whitespace
+    ; Skip whitespace and commas
 .skip_space:
     mov al, [r12]
     test al, al
@@ -1192,7 +1799,25 @@ parse_layer_sizes:
     je .next_char
     cmp al, ')'
     je .parse_done
-    jmp .parse_number
+    cmp al, '('
+    je .next_char
+    
+    ; Check if this is a digit or alpha
+    cmp al, '0'
+    jl .check_alpha
+    cmp al, '9'
+    jle .parse_number
+    
+.check_alpha:
+    cmp al, 'a'
+    jl .next_char
+    cmp al, 'z'
+    jle .parse_activation
+    cmp al, 'A'
+    jl .next_char
+    cmp al, 'Z'
+    jle .parse_activation
+    jmp .next_char
     
 .next_char:
     inc r12
@@ -1205,25 +1830,63 @@ parse_layer_sizes:
     mov [r13 + r14*4], eax      ; store layer size
     mov r12, rdi                ; update string pointer
     inc r14d                    ; increment count
+    jmp .parse_loop
     
-    ; Skip to next comma or end
-.skip_to_next:
+.parse_activation:
+    ; Extract activation name token
+    lea rdi, [rbp - 144]        ; token buffer
+    xor ecx, ecx                ; token length
+.copy_token:
     mov al, [r12]
     test al, al
-    jz .parse_done
+    jz .token_done
     cmp al, ','
-    je .next_after_comma
+    je .token_done
     cmp al, ')'
-    je .parse_done
+    je .token_done
+    cmp al, ' '
+    je .token_done
+    cmp ecx, 30                 ; max token length
+    jge .token_done
+    mov [rdi + rcx], al
     inc r12
-    jmp .skip_to_next
+    inc ecx
+    jmp .copy_token
     
-.next_after_comma:
-    inc r12
+.token_done:
+    mov byte [rdi + rcx], 0     ; null terminate
+    
+    ; Match activation name
+    push r12
+    push r13
+    push r14
+    push rbx
+    
+    lea rdi, [rbp - 144]        ; token
+    call match_activation_name
+    
+    pop rbx
+    pop r14
+    pop r13
+    pop r12
+    
+    ; eax now contains activation type (ACT_NONE if not matched)
+    test eax, eax
+    jz .parse_loop              ; not an activation, skip
+    
+    ; Store activation type for the previous linear layer
+    mov ecx, r14d
+    test ecx, ecx
+    jz .parse_loop              ; no linear yet
+    dec ecx                     ; index of last linear
+    mov [rbx + rcx*4], eax      ; store activation type
     jmp .parse_loop
     
 .parse_done:
     ; Set config fields from parsed layer sizes
+    test r14d, r14d
+    jz .parse_error
+    
     mov eax, [r13]              ; input_size = first layer
     mov [r15 + OFF_INPUT_SIZE], eax
     mov eax, [r13 + r14*4 - 4]  ; output_size = last layer
@@ -1243,25 +1906,24 @@ parse_layer_sizes:
     jb .parse_error             ; need at least input and output
     
     ; Create Sequential
-    ; Save r13, r14 before calling neural_sequential_create (which clobbers them)
     push r13
     push r14
+    push rbx                    ; activation types array
     
-    ; Call with NULL modules (will allocate empty Sequential)
     xor edi, edi                ; NULL modules
     xor esi, esi                ; 0 num_modules
     call neural_sequential_create
     
-    ; Restore r13, r14
+    pop rbx
     pop r14
     pop r13
     
     test rax, rax
     jz .parse_error
     
-    mov rbx, rax                ; sequential pointer
+    mov [rbp - 176], rax        ; save sequential pointer
     
-    ; Add layers
+    ; Add layers with activations
     xor r8d, r8d                ; current index
     mov ecx, r14d
     dec ecx                     ; number of transitions
@@ -1275,15 +1937,15 @@ parse_layer_sizes:
     push r8
     push rbx
     push r13
+    mov [rbp - 184], rbx        ; save activation array ptr
     
-    mov edi, [r13 + r8*4]      ; in_features
-    mov esi, [r13 + r8*4 + 4]  ; out_features
+    mov edi, [r13 + r8*4]       ; in_features
+    mov esi, [r13 + r8*4 + 4]   ; out_features
     
     ; Create Linear layer
     xor edx, edx                ; dtype = DT_FLOAT32
     call linear_create
     
-    ; Restore registers
     pop r13
     pop rbx
     pop r8
@@ -1292,50 +1954,266 @@ parse_layer_sizes:
     test rax, rax
     jz .parse_error
     
-    ; Add to Sequential - save registers again
+    ; Add Linear to Sequential
     push rcx
     push r8
     push rbx
     push r13
+    push rax                    ; save linear layer
     
-    mov rdi, rbx                ; sequential pointer
+    mov rdi, [rbp - 176]        ; sequential pointer
     mov rsi, rax                ; linear layer
     call neural_sequential_add
     
-    ; Restore registers
+    pop rax                     ; restore (not needed but stack balance)
     pop r13
     pop rbx
     pop r8
     pop rcx
     
-    ; Add ReLU if not the last layer
-    mov eax, r8d
-    inc eax
-    cmp eax, ecx
-    jge .next_layer
+    ; Check if we need to add activation
+    mov eax, [rbx + r8*4]       ; get activation type for this layer
+    test eax, eax
+    jz .next_layer              ; no activation
     
-    ; Create ReLU (placeholder - need to implement)
-    ; For now, skip activation
+    ; Create activation layer
+    push rcx
+    push r8
+    push rbx
+    push r13
+    mov edi, eax                ; activation type
+    xor esi, esi                ; default alpha
+    call activation_create
+    pop r13
+    pop rbx
+    pop r8
+    pop rcx
+    
+    test rax, rax
+    jz .next_layer              ; skip if failed
+    
+    ; Add activation to Sequential
+    push rcx
+    push r8
+    push rbx
+    push r13
+    
+    mov rdi, [rbp - 176]        ; sequential pointer
+    mov rsi, rax                ; activation layer
+    call neural_sequential_add
+    
+    pop r13
+    pop rbx
+    pop r8
+    pop rcx
     
 .next_layer:
     inc r8d
     jmp .add_layers
     
 .add_done:
-    mov rax, rbx
+    mov rax, [rbp - 176]        ; return sequential pointer
     jmp .cleanup
     
 .parse_error:
     xor eax, eax
     
 .cleanup:
-    add rsp, 96
+    add rsp, 192
     pop r15
     pop r14
     pop r13
     pop r12
     pop rbx
     pop rbp
+    ret
+
+; match_activation_name - Match activation name string to type constant
+; Arguments:
+;   rdi - null-terminated activation name string
+; Returns:
+;   eax - activation type constant (ACT_NONE if no match)
+match_activation_name:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    
+    mov r12, rdi                ; save string pointer
+    
+    ; Try each activation name
+    mov rdi, r12
+    lea rsi, [rel act_relu]
+    call str_equal
+    test eax, eax
+    jnz .is_relu
+    
+    mov rdi, r12
+    lea rsi, [rel act_sigmoid]
+    call str_equal
+    test eax, eax
+    jnz .is_sigmoid
+    
+    mov rdi, r12
+    lea rsi, [rel act_tanh]
+    call str_equal
+    test eax, eax
+    jnz .is_tanh
+    
+    mov rdi, r12
+    lea rsi, [rel act_softmax]
+    call str_equal
+    test eax, eax
+    jnz .is_softmax
+    
+    mov rdi, r12
+    lea rsi, [rel act_gelu]
+    call str_equal
+    test eax, eax
+    jnz .is_gelu
+    
+    mov rdi, r12
+    lea rsi, [rel act_leaky_relu]
+    call str_equal
+    test eax, eax
+    jnz .is_leaky_relu
+    
+    mov rdi, r12
+    lea rsi, [rel act_elu]
+    call str_equal
+    test eax, eax
+    jnz .is_elu
+    
+    mov rdi, r12
+    lea rsi, [rel act_selu]
+    call str_equal
+    test eax, eax
+    jnz .is_selu
+    
+    mov rdi, r12
+    lea rsi, [rel act_swish]
+    call str_equal
+    test eax, eax
+    jnz .is_swish
+    
+    mov rdi, r12
+    lea rsi, [rel act_mish]
+    call str_equal
+    test eax, eax
+    jnz .is_mish
+    
+    mov rdi, r12
+    lea rsi, [rel act_hardswish]
+    call str_equal
+    test eax, eax
+    jnz .is_hardswish
+    
+    mov rdi, r12
+    lea rsi, [rel act_softplus]
+    call str_equal
+    test eax, eax
+    jnz .is_softplus
+    
+    mov rdi, r12
+    lea rsi, [rel act_hardtanh]
+    call str_equal
+    test eax, eax
+    jnz .is_hardtanh
+    
+    ; No match
+    xor eax, eax
+    jmp .match_done
+    
+.is_relu:
+    mov eax, ACT_RELU
+    jmp .match_done
+.is_sigmoid:
+    mov eax, ACT_SIGMOID
+    jmp .match_done
+.is_tanh:
+    mov eax, ACT_TANH
+    jmp .match_done
+.is_softmax:
+    mov eax, ACT_SOFTMAX
+    jmp .match_done
+.is_gelu:
+    mov eax, ACT_GELU
+    jmp .match_done
+.is_leaky_relu:
+    mov eax, ACT_LEAKY_RELU
+    jmp .match_done
+.is_elu:
+    mov eax, ACT_ELU
+    jmp .match_done
+.is_selu:
+    mov eax, ACT_SELU
+    jmp .match_done
+.is_swish:
+    mov eax, ACT_SWISH
+    jmp .match_done
+.is_mish:
+    mov eax, ACT_MISH
+    jmp .match_done
+.is_hardswish:
+    mov eax, ACT_HARDSWISH
+    jmp .match_done
+.is_softplus:
+    mov eax, ACT_SOFTPLUS
+    jmp .match_done
+.is_hardtanh:
+    mov eax, ACT_HARDTANH
+    jmp .match_done
+    
+.match_done:
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; str_equal - Compare two null-terminated strings (case-insensitive)
+; Arguments:
+;   rdi - string 1
+;   rsi - string 2
+; Returns:
+;   eax - 1 if equal, 0 otherwise
+str_equal:
+    push rbx
+.cmp_loop:
+    mov al, [rdi]
+    mov bl, [rsi]
+    
+    ; Convert to lowercase
+    cmp al, 'A'
+    jl .no_lower1
+    cmp al, 'Z'
+    jg .no_lower1
+    add al, 32
+.no_lower1:
+    cmp bl, 'A'
+    jl .no_lower2
+    cmp bl, 'Z'
+    jg .no_lower2
+    add bl, 32
+.no_lower2:
+    
+    cmp al, bl
+    jne .not_equal
+    
+    test al, al
+    jz .equal
+    
+    inc rdi
+    inc rsi
+    jmp .cmp_loop
+    
+.equal:
+    mov eax, 1
+    pop rbx
+    ret
+    
+.not_equal:
+    xor eax, eax
+    pop rbx
     ret
 
 ; str_starts_with - Check if string starts with prefix
@@ -1600,9 +2478,18 @@ create_optimizer:
     
     mov r13, rax                ; current module
     
+    ; Check if module has parameters (activation modules have 0)
+    mov eax, [r13]              ; MODULE_N_PARAMS at offset 0
+    test eax, eax
+    jz .skip_paramless_module   ; skip modules with no params
+    
     ; Get params and param_nodes from module
     mov rcx, [r13 + 8]          ; MODULE_PARAMS
+    test rcx, rcx
+    jz .skip_paramless_module
     mov rdx, [r13 + 16]         ; MODULE_PARAM_NODES
+    test rdx, rdx
+    jz .skip_paramless_module
     
     ; Copy weight tensor and node
     mov rax, [rcx]              ; weight tensor
@@ -1620,6 +2507,7 @@ create_optimizer:
     add r15, 8
     add rbx, 8
     
+.skip_paramless_module:
     inc r14d
     jmp .collect_seq_params
     
@@ -2006,13 +2894,13 @@ model_forward:
     jmp .done
     
 .sequential_model:
-    ; Sequential model - iterate modules and call linear_forward on each
+    ; Sequential model - iterate modules and call their forward_fn
     push rbx
     push r12
     push r13
     push r14
     push r15
-    sub rsp, 8
+    sub rsp, 24
     
     mov r12, rdi                ; sequential
     mov r13, rsi                ; current input node
@@ -2027,21 +2915,43 @@ model_forward:
     
     ; Get module - modules array is at offset 16
     mov rax, [r12 + 16]         ; SEQUENTIAL_MODULES at offset 16
-    mov rdi, [rax + r15*8]      ; modules[r15]
+    mov rbx, [rax + r15*8]      ; modules[r15]
     
-    ; Call linear_forward(module, input) -> output
+    ; Check if module has params (is a Linear layer)
+    mov eax, [rbx]              ; MODULE_N_PARAMS at offset 0
+    test eax, eax
+    jz .call_activation_forward
+    
+    ; Linear layer - use linear_forward
+    mov rdi, rbx                ; module
     mov rsi, r13                ; input node
     call linear_forward
-    
     mov r13, rax                ; output becomes next input
+    jmp .seq_forward_next
     
+.call_activation_forward:
+    ; Activation layer - call forward_fn via function pointer
+    ; forward_fn signature: (Module* self, Node* input, Node** output)
+    mov rdi, rbx                ; module
+    mov rsi, r13                ; input node
+    lea rdx, [rsp]              ; output pointer (on stack)
+    mov rax, [rbx + 24]         ; MODULE_FORWARD_FN at offset 24
+    test rax, rax
+    jz .seq_forward_next        ; skip if no forward_fn
+    call rax
+    ; Check for error
+    test eax, eax
+    jnz .seq_forward_next       ; skip on error
+    mov r13, [rsp]              ; get output node
+    
+.seq_forward_next:
     inc r15
     jmp .seq_forward_loop
     
 .seq_forward_done:
     mov rax, r13                ; return final output
     
-    add rsp, 8
+    add rsp, 24
     pop r15
     pop r14
     pop r13
