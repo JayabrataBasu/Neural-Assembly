@@ -71,10 +71,15 @@ section .text
 
 ; model_save - Save model to file
 ; Arguments:
-;   rdi - pointer to model structure
+;   rdi - pointer to Sequential model structure
 ;   rsi - filename string
 ; Returns:
 ;   rax - 0 on success, -1 on error
+; 
+; Sequential structure:
+;   offset 0:  capacity (uint64_t)
+;   offset 8:  size (uint64_t) - number of modules
+;   offset 16: modules (Module**) - array of module pointers
 model_save:
     push rbp
     mov rbp, rsp
@@ -104,14 +109,14 @@ model_save:
     ; Write magic number
     lea rdi, [rel io_buffer]
     mov rax, [rel MODEL_MAGIC]
-    mov [rel rdi], rax
+    mov [rdi], rax
     
     ; Write version
     mov eax, [rel MODEL_VERSION]
     mov [rdi + 8], eax
     
-    ; Get number of layers from model structure
-    mov rax, [rel r12]              ; num_layers at offset 0
+    ; Get number of layers from Sequential structure (size is at offset 8)
+    mov rax, [r12 + 8]          ; size at offset 8
     mov [rdi + 12], eax
     
     ; Write header (16 bytes so far)
@@ -125,20 +130,27 @@ model_save:
     js .write_error
     
     ; Write each layer
-    mov r15, [rel r12]              ; num_layers
-    lea rbx, [r12 + 8]          ; pointer to first layer
+    mov r15, [r12 + 8]          ; size (num_layers) at offset 8
+    mov rbx, [r12 + 16]         ; modules array pointer at offset 16
+    
+    ; Check if modules array is valid
+    test rbx, rbx
+    jz .write_done
     
 .write_layers_loop:
     test r15, r15
     jz .write_done
     
     ; Get layer pointer
-    mov rdi, [rel rbx]
+    mov rdi, [rbx]
+    test rdi, rdi
+    jz .skip_layer
     call write_layer
     
     test rax, rax
     js .write_error
     
+.skip_layer:
     add rbx, 8
     dec r15
     jmp .write_layers_loop
@@ -201,14 +213,19 @@ write_layer:
     
     mov r12, rdi                ; Module pointer
     
-    ; Check for activation markers (not real modules)
-    ; Markers are small integers < 100, skip them
-    cmp r12, 100
-    jb .skip_marker
+    ; Check for NULL or activation modules (modules with n_params = 0)
+    test r12, r12
+    jz .layer_write_done
     
-    ; Write layer type (for now just use 1 = Linear)
+    ; Check if this is a real module or activation marker
+    ; Activation modules have n_params = 0 and a specific forward_fn
+    mov eax, [r12]              ; n_params at offset 0
+    test eax, eax
+    jz .write_activation_layer  ; No params means activation layer
+    
+    ; Write layer type (Linear layer)
     lea rdi, [rel io_buffer]
-    mov dword [rel rdi], LAYER_TYPE_LINEAR
+    mov dword [rdi], LAYER_TYPE_LINEAR
     mov dword [rdi + 4], 0      ; name_length = 0 (no name)
     
     mov rax, 1                  ; sys_write
@@ -222,8 +239,8 @@ write_layer:
     
     ; Write number of tensors (n_params)
     lea rdi, [rel io_buffer]
-    mov eax, [rel r12]              ; n_params at offset 0
-    mov [rel rdi], eax
+    mov eax, [r12]              ; n_params at offset 0
+    mov [rdi], eax
     
     mov rax, 1
     mov rdi, [rel current_fd]
@@ -235,7 +252,7 @@ write_layer:
     js .layer_write_error
     
     ; Write each tensor from params array
-    mov r13d, [rel r12]             ; n_params
+    mov r13d, [r12]             ; n_params
     mov rbx, [r12 + 8]          ; params array (Tensor**)
     test rbx, rbx
     jz .layer_write_done
@@ -244,7 +261,7 @@ write_layer:
     test r13d, r13d
     jz .layer_write_done
     
-    mov rdi, [rel rbx]              ; params[rel i] = Tensor*
+    mov rdi, [rbx]              ; params[i] = Tensor*
     test rdi, rdi
     jz .skip_null_tensor
     call write_tensor_data
@@ -257,12 +274,21 @@ write_layer:
     dec r13d
     jmp .write_tensors_loop
     
-.skip_marker:
-    ; For activation markers, just write a marker layer type
-    lea rdi, [rel io_buffer]
-    mov eax, r12d               ; The marker value becomes the type
+.write_activation_layer:
+    ; Activation layer - determine type from config
+    mov rax, [r12 + 32]         ; config pointer
+    test rax, rax
+    jz .write_default_activation
+    mov eax, [rax]              ; activation type from config
     add eax, 9                  ; offset to get LAYER_TYPE_RELU=10, etc.
-    mov [rel rdi], eax
+    jmp .write_act_type
+    
+.write_default_activation:
+    mov eax, LAYER_TYPE_RELU    ; default to relu
+    
+.write_act_type:
+    lea rdi, [rel io_buffer]
+    mov [rdi], eax
     mov dword [rdi + 4], 0      ; name_length
     mov dword [rdi + 8], 0      ; num_tensors
     
@@ -319,7 +345,7 @@ write_tensor_data:
     
     ; Write number of dimensions (as 4-byte integer for file format)
     lea rdi, [rel io_buffer]
-    mov [rel rdi], eax              ; just lower 32 bits
+    mov [rdi], eax              ; just lower 32 bits
     
     ; Copy shape values from shape array pointer
     mov rsi, [r12 + 16]         ; shape pointer
@@ -329,8 +355,8 @@ write_tensor_data:
 .copy_dims:
     test rcx, rcx
     jz .dims_done
-    mov rax, [rel rsi]              ; shape[rel i] is uint64_t
-    mov [rel rdi], eax              ; write as 32-bit
+    mov rax, [rsi]              ; shape[i] is uint64_t
+    mov [rdi], eax              ; write as 32-bit
     add rsi, 8
     add rdi, 4
     dec rcx
@@ -362,7 +388,7 @@ write_tensor_data:
     ; Size in bytes = elements * 4 (float32)
     mov rax, 1
     mov rdi, [rel current_fd]
-    mov rsi, [rel r12]              ; data pointer at offset 0
+    mov rsi, [r12]              ; data pointer at offset 0
     mov rdx, r14
     shl rdx, 2                  ; * 4 for float32
     syscall
@@ -427,7 +453,7 @@ model_load:
     
     ; Verify magic number
     lea rdi, [rel io_buffer]
-    mov rax, [rel rdi]
+    mov rax, [rdi]
     cmp rax, [rel MODEL_MAGIC]
     jne .load_magic_error
     
@@ -439,23 +465,33 @@ model_load:
     ; Get number of layers
     mov r14d, [rdi + 12]        ; num_layers
     
-    ; Allocate model structure
-    ; Size: 8 (num_layers) + 8 * num_layers (layer pointers)
-    mov eax, r14d
-    shl eax, 3
-    add eax, 8
-    mov edi, eax
+    ; Allocate Sequential structure
+    ; Sequential: capacity(8) + size(8) + modules ptr(8) + intermediates ptr(8) + inter_cap(8) + save_inter(1)
+    mov edi, 48                 ; SEQUENTIAL_SIZE_BYTES
     call mem_alloc
     
     test rax, rax
     jz .load_alloc_error
     
-    mov r15, rax                ; model pointer
-    mov [rel r15], r14d             ; store num_layers
+    mov r15, rax                ; sequential pointer
+    mov qword [r15], r14        ; capacity = num_layers
+    mov qword [r15 + 8], r14    ; size = num_layers
+    
+    ; Allocate modules array
+    mov eax, r14d
+    shl eax, 3                  ; * 8 for pointers
+    mov edi, eax
+    call mem_alloc
+    test rax, rax
+    jz .load_alloc_error
+    mov [r15 + 16], rax         ; modules array
+    mov qword [r15 + 24], 0     ; intermediates = NULL
+    mov qword [r15 + 32], 0     ; inter_cap = 0
+    mov byte [r15 + 40], 0      ; save_inter = false
     
     ; Load each layer
-    lea rbx, [r15 + 8]          ; pointer to layer pointers array
-    mov r14d, [rel r15]             ; num_layers
+    mov rbx, [r15 + 16]         ; pointer to modules array
+    mov r14d, [r15 + 8]         ; num_layers from size
     
 .load_layers_loop:
     test r14d, r14d
@@ -466,7 +502,7 @@ model_load:
     test rax, rax
     jz .load_layer_error
     
-    mov [rel rbx], rax              ; store layer pointer
+    mov [rbx], rax              ; store layer pointer
     add rbx, 8
     dec r14d
     jmp .load_layers_loop
@@ -553,8 +589,8 @@ read_layer:
     
     ; Copy type and name_length
     lea rsi, [rel io_buffer]
-    mov eax, [rel rsi]
-    mov [rel r12], eax              ; layer_type
+    mov eax, [rsi]
+    mov [r12], eax              ; layer_type
     mov eax, [rsi + 4]
     mov [r12 + 4], eax          ; name_length
     mov r13d, eax               ; save name_length
@@ -581,7 +617,7 @@ read_layer:
     ; Add null terminator
     mov rdi, [r12 + 8]
     add rdi, r13
-    mov byte [rel rdi], 0
+    mov byte [rdi], 0
     
 .skip_read_name:
     ; Read number of tensors
@@ -595,7 +631,7 @@ read_layer:
     jne .read_layer_error
     
     lea rsi, [rel io_buffer]
-    mov eax, [rel rsi]
+    mov eax, [rsi]
     mov [r12 + 16], eax         ; num_tensors
     mov r14d, eax
     
@@ -618,7 +654,7 @@ read_layer:
     test rax, rax
     jz .read_layer_error
     
-    mov [rel rbx], rax
+    mov [rbx], rax
     add rbx, 8
     dec r14d
     jmp .read_tensors_loop
@@ -663,7 +699,7 @@ read_tensor_data:
     jne .read_tensor_error
     
     lea rsi, [rel io_buffer]
-    mov r12d, [rel rsi]             ; ndim
+    mov r12d, [rsi]             ; ndim
     
     ; Read dimensions
     mov eax, r12d
@@ -688,7 +724,7 @@ read_tensor_data:
 .calc_size:
     test ecx, ecx
     jz .size_done
-    mov eax, [rel rsi]
+    mov eax, [rsi]
     imul r14d, eax
     add rsi, 4
     dec ecx
@@ -717,8 +753,8 @@ read_tensor_data:
 .copy_read_dims:
     test ecx, ecx
     jz .dims_read_done
-    mov eax, [rel rsi]
-    mov [rel rdi], eax
+    mov eax, [rsi]
+    mov [rdi], eax
     add rsi, 4
     add rdi, 4
     dec ecx
@@ -738,7 +774,7 @@ read_tensor_data:
     ; Align to 32 bytes
     add rax, 31
     and rax, ~31
-    mov [rel r15], rax              ; data pointer
+    mov [r15], rax              ; data pointer
     
     ; Read tensor data
     mov eax, r14d
@@ -747,7 +783,7 @@ read_tensor_data:
     
     mov rax, 0
     mov rdi, [rel current_fd]
-    mov rsi, [rel r15]
+    mov rsi, [r15]
     mov edx, r13d
     syscall
     
@@ -767,21 +803,21 @@ read_tensor_data:
     mov ecx, r12d
     dec ecx
     lea rdx, [rdi + rcx*4]
-    mov dword [rel rdx], 1
+    mov dword [rdx], 1
     
     ; Calculate remaining strides
     dec ecx
     js .strides_done
     
 .calc_strides:
-    ; strides[rel i] = strides[i+1] * dims[i+1]
-    lea rdx, [rdi + rcx*4]      ; &strides[rel i]
+    ; strides[i] = strides[i+1] * dims[i+1]
+    lea rdx, [rdi + rcx*4]      ; &strides[i]
     mov eax, [rdx + 4]          ; strides[i+1]
     
     lea r8, [rsi + rcx*4]
     mov r9d, [r8 + 4]           ; dims[i+1]
     imul eax, r9d
-    mov [rel rdx], eax
+    mov [rdx], eax
     
     dec ecx
     jns .calc_strides
@@ -842,7 +878,7 @@ model_save_checkpoint:
     ; Write checkpoint header
     lea rdi, [rel io_buffer]
     mov rax, 0x54504B43         ; "CKPT"
-    mov [rel rdi], eax
+    mov [rdi], eax
     mov [rdi + 4], r15d         ; epoch
     
     mov rax, 1
@@ -869,8 +905,8 @@ model_save_checkpoint:
     jz .no_optimizer
     
     lea rdi, [rel io_buffer]
-    mov eax, [rel r13]              ; optimizer type
-    mov [rel rdi], eax
+    mov eax, [r13]              ; optimizer type
+    mov [rdi], eax
     mov eax, [r13 + 4]          ; num_params
     mov [rdi + 4], eax
     movss xmm0, [r13 + 8]       ; learning_rate
@@ -949,7 +985,7 @@ model_load_checkpoint:
     
     ; Verify magic
     lea rsi, [rel io_buffer]
-    mov eax, [rel rsi]
+    mov eax, [rsi]
     cmp eax, 0x54504B43         ; "CKPT"
     jne .ckpt_load_error
     
@@ -957,7 +993,7 @@ model_load_checkpoint:
     mov eax, [rsi + 4]
     test r13, r13
     jz .skip_epoch_store
-    mov [rel r13], eax
+    mov [r13], eax
     
 .skip_epoch_store:
     ; Load model

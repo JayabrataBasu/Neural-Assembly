@@ -239,6 +239,7 @@ section .text
     extern sigmoid_backward
     extern softmax_forward
     extern softmax_backward
+    extern node_sigmoid
     
     ; Sequential container
     extern neural_sequential_create
@@ -2728,7 +2729,14 @@ train_epoch:
     jmp .loss_computed
     
 .use_bce_loss:
-    ; Binary classification: use bce_loss
+    ; Binary classification: apply sigmoid first, then use bce_loss
+    mov rdi, rbx                ; predictions node (logits)
+    call node_sigmoid           ; apply sigmoid
+    test rax, rax
+    jz .next_batch
+    mov rbx, rax                ; now probabilities
+    mov rdi, rbx                ; probabilities node
+    mov rsi, [rbp - 72]         ; batch_y tensor
     call bce_loss
 
 .loss_computed:
