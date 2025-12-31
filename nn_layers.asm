@@ -70,6 +70,11 @@
 %define NODE_VISITED        28
 %define NODE_PARENTS        32
 %define NODE_SAVED_TENSORS  40
+%define NODE_REQUIRES_GRAD  56
+
+; Node flags for requires_grad field
+%define NODE_FLAG_REQUIRES_GRAD  1
+%define NODE_FLAG_PERSISTENT     2
 
 %define TENSOR_DATA         0
 %define TENSOR_NDIM         8
@@ -338,15 +343,15 @@ linear_create:
     mov [r15 + MODULE_PARAM_NODES], rax
     mov [rsp+24], rax
     
-    ; Create nodes for parameters
+    ; Create nodes for parameters (with PERSISTENT flag to prevent accidental freeing)
     mov rdi, [rel rbx]                  ; weight tensor
-    mov rsi, 1                      ; requires_grad
+    mov rsi, (NODE_FLAG_REQUIRES_GRAD | NODE_FLAG_PERSISTENT)  ; requires_grad + persistent
     call node_create
     mov rcx, [rsp+24]
     mov [rel rcx], rax                  ; param_nodes[0]
     
     mov rdi, [rbx + 8]              ; bias tensor
-    mov rsi, 1
+    mov rsi, (NODE_FLAG_REQUIRES_GRAD | NODE_FLAG_PERSISTENT)  ; requires_grad + persistent
     call node_create
     mov rcx, [rsp+24]
     mov [rcx + 8], rax              ; param_nodes[1]

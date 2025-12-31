@@ -14,7 +14,7 @@
 ; 32      8       parents      (Node**)
 ; 40      8       saved_tensors (void**) - for backward context
 ; 48      8       n_saved      (uint64_t)
-; 56      8       requires_grad (uint64_t)
+; 56      8       requires_grad (uint64_t) - bits: 0=requires_grad, 1=persistent
 
 %define NODE_SIZE           64
 %define NODE_VALUE          0
@@ -26,6 +26,10 @@
 %define NODE_SAVED_TENSORS  40
 %define NODE_N_SAVED        48
 %define NODE_REQUIRES_GRAD  56
+
+; requires_grad field flags
+%define NODE_FLAG_REQUIRES_GRAD  1
+%define NODE_FLAG_PERSISTENT     2
 
 ; Tensor struct offsets
 %define TENSOR_DATA         0
@@ -81,6 +85,8 @@ extern reduce_sum
 global node_create
 global node_from_tensor
 global node_free
+global node_free_graph
+global node_free_with_tensor
 global zero_grad
 global backward
 global node_add
@@ -96,7 +102,7 @@ global matmul_backward
 ; node_create - Create a new computation graph node
 ; Arguments:
 ;   RDI = Tensor* value
-;   RSI = requires_grad (0 or 1)
+;   RSI = flags (bit 0: requires_grad, bit 1: persistent)
 ; Returns:
 ;   RAX = Node*
 ; =============================================================================
@@ -109,7 +115,7 @@ node_create:
     sub rsp, 8
     
     mov r12, rdi                    ; value tensor
-    mov r13, rsi                    ; requires_grad
+    mov r13, rsi                    ; flags (requires_grad + persistent)
     
     ; Allocate node struct
     mov rdi, NODE_SIZE
@@ -128,10 +134,10 @@ node_create:
     mov qword [rbx + NODE_PARENTS], 0
     mov qword [rbx + NODE_SAVED_TENSORS], 0
     mov qword [rbx + NODE_N_SAVED], 0
-    mov [rbx + NODE_REQUIRES_GRAD], r13
+    mov [rbx + NODE_REQUIRES_GRAD], r13  ; Store full flags
     
-    ; If requires_grad, allocate gradient tensor
-    test r13, r13
+    ; If requires_grad bit is set, allocate gradient tensor
+    test r13, NODE_FLAG_REQUIRES_GRAD
     jz .no_grad
     
     ; Create gradient tensor with same shape
@@ -203,12 +209,8 @@ node_free:
     call mem_free
 .skip_parents:
     
-    ; Free saved tensors if exists
-    mov rdi, [r12 + NODE_SAVED_TENSORS]
-    test rdi, rdi
-    jz .skip_saved
-    call mem_free
-.skip_saved:
+    ; NOTE: Don't free saved_tensors - it may point to persistent data like modules
+    ; The saved_tensors field is used as a generic context pointer
     
     ; Free node struct
     mov rdi, r12
@@ -216,6 +218,224 @@ node_free:
 
 .done:
     add rsp, 8
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; node_free_with_tensor - Free a node AND its value tensor
+; Arguments:
+;   RDI = Node* node
+; Use this when freeing intermediate nodes that own their tensors
+; =============================================================================
+node_free_with_tensor:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    sub rsp, 8
+    
+    test rdi, rdi
+    jz .nfwt_done
+    
+    mov r12, rdi
+    
+    ; Free value tensor first
+    mov rdi, [r12 + NODE_VALUE]
+    test rdi, rdi
+    jz .nfwt_skip_value
+    call tensor_free
+.nfwt_skip_value:
+    
+    ; Free gradient tensor if exists
+    mov rdi, [r12 + NODE_GRAD]
+    test rdi, rdi
+    jz .nfwt_skip_grad
+    call tensor_free
+.nfwt_skip_grad:
+    
+    ; Free parents array if exists
+    mov rdi, [r12 + NODE_PARENTS]
+    test rdi, rdi
+    jz .nfwt_skip_parents
+    call mem_free
+.nfwt_skip_parents:
+    
+    ; NOTE: Don't free saved_tensors - it may point to persistent data like modules
+    ; The saved_tensors field is used as a generic context pointer
+    
+    ; Free node struct
+    mov rdi, r12
+    call mem_free
+
+.nfwt_done:
+    add rsp, 8
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; node_free_graph - Recursively free an entire computational graph
+; Arguments:
+;   RDI = Node* root (starting from loss node, traverses to inputs)
+; Frees all nodes and their tensors in the computation graph.
+; Uses post-order traversal to ensure children are freed before parents.
+; =============================================================================
+section .bss
+    align 8
+    ; Visited array for graph freeing (max 1024 nodes)
+    free_visited:       resq 1024
+    free_visited_count: resq 1
+
+section .text
+node_free_graph:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 24
+    
+    test rdi, rdi
+    jz .nfg_done
+    
+    mov r12, rdi                    ; root node
+    
+    ; Reset visited tracking
+    mov qword [rel free_visited_count], 0
+    
+    ; Call recursive helper
+    mov rdi, r12
+    call node_free_graph_recursive
+    
+.nfg_done:
+    add rsp, 24
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; =============================================================================
+; node_free_graph_recursive - Internal recursive helper
+; Arguments:
+;   RDI = Node* node
+; =============================================================================
+node_free_graph_recursive:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    sub rsp, 8
+    
+    test rdi, rdi
+    jz .nfgr_done
+    
+    mov r12, rdi                    ; current node
+    
+    ; Check if node is persistent (model parameters) - don't free those
+    mov rax, [r12 + NODE_REQUIRES_GRAD]
+    test rax, NODE_FLAG_PERSISTENT
+    jnz .nfgr_done                  ; Skip persistent nodes
+    
+    ; Check if already visited
+    mov rcx, [rel free_visited_count]
+    test rcx, rcx
+    jz .nfgr_not_visited
+    
+    lea rbx, [rel free_visited]
+    xor r8d, r8d
+.nfgr_check_visited:
+    cmp r8, rcx
+    jge .nfgr_not_visited
+    cmp [rbx + r8*8], r12
+    je .nfgr_done                   ; Already visited, skip
+    inc r8
+    jmp .nfgr_check_visited
+    
+.nfgr_not_visited:
+    ; Mark as visited
+    mov rax, [rel free_visited_count]
+    cmp rax, 1024
+    jge .nfgr_skip_mark             ; Avoid overflow
+    lea rbx, [rel free_visited]
+    mov [rbx + rax*8], r12
+    inc rax
+    mov [rel free_visited_count], rax
+.nfgr_skip_mark:
+    
+    ; First, recursively free parents (children in backward graph)
+    mov ecx, [r12 + NODE_N_PARENTS]
+    test ecx, ecx
+    jz .nfgr_free_self
+    
+    mov r13, [r12 + NODE_PARENTS]   ; parents array
+    xor r14d, r14d                  ; parent index
+    
+.nfgr_free_parents_loop:
+    cmp r14d, [r12 + NODE_N_PARENTS]
+    jge .nfgr_free_self
+    
+    ; Get parent node
+    mov rdi, [r13 + r14*8]
+    test rdi, rdi
+    jz .nfgr_next_parent
+    
+    ; Recursively free parent
+    push r12
+    push r13
+    push r14
+    call node_free_graph_recursive
+    pop r14
+    pop r13
+    pop r12
+    
+.nfgr_next_parent:
+    inc r14d
+    jmp .nfgr_free_parents_loop
+    
+.nfgr_free_self:
+    ; Free this node
+    ; For leaf nodes with requires_grad=false, DON'T free value tensor (external input)
+    ; For leaf nodes with requires_grad=true, free value tensor (computed temporary)
+    ; For non-leaf nodes, always free the value tensor (created by operations)
+    mov ecx, [r12 + NODE_N_PARENTS]
+    test ecx, ecx
+    jz .nfgr_check_leaf_ownership
+    
+    ; Non-leaf node: free with tensor
+    mov rdi, r12
+    call node_free_with_tensor
+    jmp .nfgr_done
+    
+.nfgr_check_leaf_ownership:
+    ; Leaf node - check requires_grad to determine ownership
+    mov rax, [r12 + NODE_REQUIRES_GRAD]
+    test rax, rax
+    jz .nfgr_free_leaf_external
+    
+    ; Leaf with requires_grad=true owns its tensor (computed value like W^T)
+    mov rdi, r12
+    call node_free_with_tensor
+    jmp .nfgr_done
+    
+.nfgr_free_leaf_external:
+    ; Leaf with requires_grad=false: external input, don't free tensor
+    mov rdi, r12
+    call node_free
+    
+.nfgr_done:
+    add rsp, 8
+    pop r14
+    pop r13
     pop r12
     pop rbx
     pop rbp

@@ -225,6 +225,7 @@ section .text
     
     ; Autograd nodes
     extern node_create
+    extern node_free_graph
     
     ; Math kernels (element-wise)
     extern ew_add
@@ -2696,13 +2697,14 @@ train_epoch:
     ; Create input node from batch_x tensor
     mov rdi, [rbp - 64]         ; batch_x tensor
     test rdi, rdi
-    jz .next_batch              ; skip if NULL
+    jz .cleanup_batch           ; skip if NULL
     
     mov rsi, 0                  ; requires_grad = false for input
     call node_create
     test rax, rax
-    jz .next_batch
+    jz .cleanup_batch
     mov rbx, rax                ; input node
+    mov [rbp - 96], rax         ; save input node for cleanup
     
     ; Forward pass through model
     mov rdi, r12                ; model
@@ -2710,7 +2712,7 @@ train_epoch:
     call model_forward
     
     test rax, rax
-    jz .next_batch
+    jz .cleanup_batch
     mov rbx, rax                ; predictions node
     
     ; Calculate loss - use BCE for binary (output_size=1), CE for multi-class
@@ -2733,7 +2735,7 @@ train_epoch:
     mov rdi, rbx                ; predictions node (logits)
     call node_sigmoid           ; apply sigmoid
     test rax, rax
-    jz .next_batch
+    jz .cleanup_batch
     mov rbx, rax                ; now probabilities
     mov rdi, rbx                ; probabilities node
     mov rsi, [rbp - 72]         ; batch_y tensor
@@ -2755,7 +2757,7 @@ train_epoch:
     pop rax                     ; restore loss node
     
     test rax, rax
-    jz .next_batch
+    jz .cleanup_batch
     
     ; Save loss node for backward pass
     mov [rbp - 88], rax         ; save loss node at rbp-88
@@ -2789,8 +2791,38 @@ train_epoch:
     mov rdi, r13
     mov rax, [r13 + 32]         ; OPT_ZERO_GRAD_FN offset
     test rax, rax
-    jz .next_batch
+    jz .cleanup_batch
     call rax
+
+.cleanup_batch:
+    ; =========================================================================
+    ; MEMORY CLEANUP: Free computational graph and batch tensors
+    ; This prevents memory leaks that would accumulate over training epochs
+    ; =========================================================================
+    
+    ; Free the computational graph starting from loss node
+    ; This recursively frees all intermediate nodes created during forward/backward
+    mov rdi, [rbp - 88]         ; loss node (root of computation graph)
+    test rdi, rdi
+    jz .cleanup_batch_tensors
+    call node_free_graph
+    mov qword [rbp - 88], 0     ; clear pointer
+    
+.cleanup_batch_tensors:
+    ; Free batch_x tensor (created by dataset_get_batch)
+    mov rdi, [rbp - 64]         ; batch_x tensor
+    test rdi, rdi
+    jz .cleanup_batch_y
+    call tensor_free
+    mov qword [rbp - 64], 0     ; clear pointer
+    
+.cleanup_batch_y:
+    ; Free batch_y tensor (created by dataset_get_batch)
+    mov rdi, [rbp - 72]         ; batch_y tensor
+    test rdi, rdi
+    jz .next_batch
+    call tensor_free
+    mov qword [rbp - 72], 0     ; clear pointer
     
 .next_batch:
     inc dword [rbp - 56]
@@ -3216,7 +3248,7 @@ evaluate_model:
     mov rsi, r14
     call model_forward
     test rax, rax
-    jz .eval_done               ; Skip if forward failed
+    jz .eval_cleanup               ; Skip if forward failed
     mov r15, rax                ; output node
     
     ; Calculate batch accuracy
@@ -3229,6 +3261,29 @@ evaluate_model:
     mov eax, [rbp - 72]
     add [rbp - 64], eax         ; total_count += batch_size
     
+.eval_cleanup:
+    ; Cleanup: Free computational graph and batch tensors
+    ; Free graph starting from output node (if exists)
+    test r15, r15
+    jz .eval_cleanup_batch
+    mov rdi, r15
+    call node_free_graph
+    
+.eval_cleanup_batch:
+    ; Free batch_x tensor
+    mov rdi, [rbp - 48]
+    test rdi, rdi
+    jz .eval_cleanup_y
+    call tensor_free
+    
+.eval_cleanup_y:
+    ; Free batch_y tensor
+    mov rdi, [rbp - 56]
+    test rdi, rdi
+    jz .eval_next
+    call tensor_free
+    
+.eval_next:
     ; Advance to next batch
     mov eax, [rbp - 72]
     add [rbp - 68], eax

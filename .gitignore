@@ -12,6 +12,7 @@ __pycache__/
 # Issue tracking and verification files
 model_loading_issue.md
 VERIFICATION_GUIDE.md
+memoreyleaks.md
 
 # Virtual environment
 venv/
