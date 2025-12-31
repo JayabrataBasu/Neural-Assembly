@@ -9,6 +9,10 @@ __pycache__/
 .DS_Store
 *.swp
 
+# Issue tracking and verification files
+model_loading_issue.md
+VERIFICATION_GUIDE.md
+
 # Virtual environment
 venv/
 

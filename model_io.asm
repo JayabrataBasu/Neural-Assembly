@@ -39,11 +39,26 @@ section .text
     global tensor_load
     global write_tensor_data
     global read_tensor_data
+    global linear_forward_loaded
+    global activation_relu_forward
+    global activation_sigmoid_forward
+    global activation_tanh_forward
+    global activation_softmax_forward
     
     extern mem_alloc
     extern mem_free
+    extern mem_zero
     extern tensor_create
+    extern tensor_free
     extern tensor_get_size
+    extern print_error
+    extern node_create
+    extern matmul
+    extern ew_add
+    extern node_relu
+    extern node_sigmoid
+    extern node_tanh
+    extern node_softmax
 
 ; ============================================================================
 ; MODEL FILE FORMAT
@@ -555,9 +570,18 @@ model_load:
     pop rbp
     ret
 
-; read_layer - Read a layer from file
+; read_layer - Read a layer from file and reconstruct proper Module structure
 ; Returns:
-;   rax - pointer to layer structure, NULL on error
+;   rax - pointer to Module structure, NULL on error
+; 
+; This function reads saved layer data and reconstructs a proper Module struct
+; that is compatible with model_forward's expectations:
+;   Module structure (64 bytes):
+;     offset 0:  n_params (4 bytes)
+;     offset 8:  params (Tensor**)
+;     offset 16: param_nodes (Node**)
+;     offset 24: forward_fn pointer
+;     offset 32: config pointer
 read_layer:
     push rbp
     mov rbp, rsp
@@ -565,7 +589,8 @@ read_layer:
     push r12
     push r13
     push r14
-    sub rsp, 48
+    push r15
+    sub rsp, 56
     
     ; Read layer header (type + name_length)
     mov rax, 0                  ; sys_read
@@ -577,47 +602,24 @@ read_layer:
     cmp rax, 8
     jne .read_layer_error
     
-    ; Allocate layer structure
-    ; Size: 48 bytes base + name + tensor pointers
-    mov edi, 256                ; generous allocation
-    call mem_alloc
-    
-    test rax, rax
-    jz .read_layer_error
-    
-    mov r12, rax                ; layer pointer
-    
-    ; Copy type and name_length
+    ; Get layer type
     lea rsi, [rel io_buffer]
-    mov eax, [rsi]
-    mov [r12], eax              ; layer_type
-    mov eax, [rsi + 4]
-    mov [r12 + 4], eax          ; name_length
-    mov r13d, eax               ; save name_length
+    mov r13d, [rsi]             ; layer_type
+    mov r14d, [rsi + 4]         ; name_length
     
-    ; Read layer name if present
-    test r13d, r13d
+    ; Skip layer name if present
+    test r14d, r14d
     jz .skip_read_name
     
-    ; Allocate name buffer
-    mov edi, r13d
-    add edi, 1                  ; null terminator
-    call mem_alloc
-    mov [r12 + 8], rax          ; name pointer
-    
+    ; Read and discard name
     mov rax, 0                  ; sys_read
     mov rdi, [rel current_fd]
-    mov rsi, [r12 + 8]
-    mov edx, r13d
+    lea rsi, [rel io_buffer]
+    mov edx, r14d
     syscall
     
-    cmp eax, r13d
+    cmp eax, r14d
     jne .read_layer_error
-    
-    ; Add null terminator
-    mov rdi, [r12 + 8]
-    add rdi, r13
-    mov byte [rdi], 0
     
 .skip_read_name:
     ; Read number of tensors
@@ -631,35 +633,193 @@ read_layer:
     jne .read_layer_error
     
     lea rsi, [rel io_buffer]
-    mov eax, [rsi]
-    mov [r12 + 16], eax         ; num_tensors
-    mov r14d, eax
+    mov r15d, [rsi]             ; num_tensors
     
-    ; Allocate tensor pointers array
-    mov eax, r14d
+    ; Now create proper Module structure based on layer type
+    ; Allocate Module structure (64 bytes)
+    mov edi, 64
+    call mem_alloc
+    test rax, rax
+    jz .read_layer_error
+    mov r12, rax                ; Module pointer
+    
+    ; Zero out the module structure
+    mov rdi, r12
+    mov esi, 64
+    call mem_zero
+    
+    ; Check layer type and reconstruct accordingly
+    cmp r13d, LAYER_TYPE_LINEAR
+    je .read_linear_layer
+    
+    ; Activation layer (RELU=10, SIGMOID=11, TANH=12, SOFTMAX=13)
+    cmp r13d, LAYER_TYPE_RELU
+    je .read_activation_layer
+    cmp r13d, LAYER_TYPE_SIGMOID
+    je .read_activation_layer
+    cmp r13d, LAYER_TYPE_TANH
+    je .read_activation_layer
+    cmp r13d, LAYER_TYPE_SOFTMAX
+    je .read_activation_layer
+    
+    ; Unknown layer type - treat as activation
+    jmp .read_activation_layer
+    
+.read_linear_layer:
+    ; Linear layer - read tensors and set up Module
+    mov dword [r12], r15d       ; n_params = num_tensors (usually 2: weight, bias)
+    
+    ; Allocate params array (Tensor**)
+    mov eax, r15d
     shl eax, 3                  ; * 8 for pointers
     mov edi, eax
+    test edi, edi
+    jz .linear_no_params
     call mem_alloc
-    mov [r12 + 24], rax         ; tensors array pointer
+    test rax, rax
+    jz .read_layer_error
+    mov [r12 + 8], rax          ; params array
+    mov rbx, rax
     
     ; Read each tensor
-    mov rbx, [r12 + 24]
-    
-.read_tensors_loop:
+    mov r14d, r15d              ; counter
+.read_linear_tensors:
     test r14d, r14d
-    jz .read_layer_done
+    jz .linear_tensors_done
     
     call read_tensor_data
-    
     test rax, rax
     jz .read_layer_error
     
-    mov [rbx], rax
+    mov [rbx], rax              ; store tensor pointer
     add rbx, 8
     dec r14d
-    jmp .read_tensors_loop
+    jmp .read_linear_tensors
     
-.read_layer_done:
+.linear_tensors_done:
+    ; IMPORTANT: Create param_nodes from loaded tensors
+    ; linear_forward_fn expects param_nodes, not just params
+    mov eax, [r12]              ; n_params
+    test eax, eax
+    jz .skip_param_nodes
+    
+    ; Allocate param_nodes array
+    shl eax, 3                  ; * 8 for pointers
+    mov edi, eax
+    call mem_alloc
+    test rax, rax
+    jz .read_layer_error
+    mov [r12 + 16], rax         ; param_nodes array
+    mov rbx, rax                ; param_nodes array
+    
+    ; Create nodes from each tensor
+    mov r14d, [r12]             ; n_params count
+    mov r15, [r12 + 8]          ; params array
+    
+.create_param_nodes_loop:
+    test r14d, r14d
+    jz .skip_param_nodes
+    
+    mov rdi, [r15]              ; tensor
+    mov rsi, 1                  ; requires_grad = true
+    call node_create
+    test rax, rax
+    jz .read_layer_error
+    
+    mov [rbx], rax              ; store node
+    add rbx, 8
+    add r15, 8
+    dec r14d
+    jmp .create_param_nodes_loop
+    
+.skip_param_nodes:
+    ; Set forward_fn (though for Linear with n_params > 0, 
+    ; model_forward bypasses this and calls linear_forward directly)
+    lea rax, [rel linear_forward_loaded]
+    mov [r12 + 24], rax
+    
+    ; Create config with in/out features from weight tensor shape
+    mov edi, 16                 ; config size
+    call mem_alloc
+    test rax, rax
+    jz .read_layer_done_ok      ; config optional
+    mov [r12 + 32], rax
+    
+    ; Get dimensions from weight tensor (shape: [out_features, in_features])
+    mov rbx, [r12 + 8]          ; params array
+    mov rbx, [rbx]              ; weight tensor
+    test rbx, rbx
+    jz .read_layer_done_ok
+    mov rcx, [rbx + 16]         ; shape pointer (TENSOR_SHAPE=16)
+    test rcx, rcx
+    jz .read_layer_done_ok
+    mov rdi, [r12 + 32]         ; config
+    mov rax, [rcx + 8]          ; shape[1] = in_features (assuming shape is 64-bit)
+    mov [rdi], rax
+    mov rax, [rcx]              ; shape[0] = out_features
+    mov [rdi + 8], rax
+    jmp .read_layer_done_ok
+    
+.linear_no_params:
+    mov qword [r12 + 8], 0
+    lea rax, [rel linear_forward_loaded]
+    mov [r12 + 24], rax
+    jmp .read_layer_done_ok
+    
+.read_activation_layer:
+    ; Activation layer - no params, set up forward_fn based on type
+    mov dword [r12], 0          ; n_params = 0
+    mov qword [r12 + 8], 0      ; params = NULL
+    mov qword [r12 + 16], 0     ; param_nodes = NULL
+    
+    ; Allocate config for activation type
+    mov edi, 16
+    call mem_alloc
+    test rax, rax
+    jz .set_act_forward
+    mov [r12 + 32], rax
+    
+    ; Convert LAYER_TYPE to activation type
+    ; LAYER_TYPE_RELU=10 -> ACT_RELU=1, etc.
+    mov eax, r13d
+    sub eax, 9                  ; LAYER_TYPE_RELU(10) - 9 = 1 = ACT_RELU
+    mov rdi, [r12 + 32]
+    mov [rdi], eax              ; activation_type
+    
+.set_act_forward:
+    ; Set forward_fn based on activation type
+    cmp r13d, LAYER_TYPE_RELU
+    je .set_relu_forward
+    cmp r13d, LAYER_TYPE_SIGMOID
+    je .set_sigmoid_forward
+    cmp r13d, LAYER_TYPE_TANH
+    je .set_tanh_forward
+    cmp r13d, LAYER_TYPE_SOFTMAX
+    je .set_softmax_forward
+    ; Default to relu
+    jmp .set_relu_forward
+    
+.set_relu_forward:
+    lea rax, [rel activation_relu_forward]
+    mov [r12 + 24], rax
+    jmp .read_layer_done_ok
+    
+.set_sigmoid_forward:
+    lea rax, [rel activation_sigmoid_forward]
+    mov [r12 + 24], rax
+    jmp .read_layer_done_ok
+    
+.set_tanh_forward:
+    lea rax, [rel activation_tanh_forward]
+    mov [r12 + 24], rax
+    jmp .read_layer_done_ok
+    
+.set_softmax_forward:
+    lea rax, [rel activation_softmax_forward]
+    mov [r12 + 24], rax
+    jmp .read_layer_done_ok
+    
+.read_layer_done_ok:
     mov rax, r12
     jmp .read_layer_cleanup
     
@@ -667,7 +827,8 @@ read_layer:
     xor eax, eax
     
 .read_layer_cleanup:
-    add rsp, 48
+    add rsp, 56
+    pop r15
     pop r14
     pop r13
     pop r12
@@ -675,7 +836,7 @@ read_layer:
     pop rbp
     ret
 
-; read_tensor_data - Read tensor from file
+; read_tensor_data - Read tensor from file using proper tensor_create
 ; Returns:
 ;   rax - pointer to tensor, NULL on error
 read_tensor_data:
@@ -686,7 +847,7 @@ read_tensor_data:
     push r13
     push r14
     push r15
-    sub rsp, 48
+    sub rsp, 80                 ; Extra space for shape array
     
     ; Read ndim first
     mov rax, 0
@@ -699,9 +860,10 @@ read_tensor_data:
     jne .read_tensor_error
     
     lea rsi, [rel io_buffer]
-    mov r12d, [rsi]             ; ndim
+    mov r12d, [rsi]             ; ndim (32-bit from file)
+    mov [rbp - 56], r12         ; save ndim as 64-bit
     
-    ; Read dimensions
+    ; Read dimensions (32-bit integers from file)
     mov eax, r12d
     shl eax, 2                  ; * 4 for int32
     mov r13d, eax               ; bytes to read
@@ -715,122 +877,69 @@ read_tensor_data:
     cmp eax, r13d
     jne .read_tensor_error
     
-    ; Calculate total elements
-    xor r14d, r14d
-    mov r14d, 1                 ; accumulator
-    lea rsi, [rel io_buffer]
-    mov ecx, r12d
+    ; Convert 32-bit dimensions to 64-bit shape array on stack
+    ; Store shape at [rbp - 48] (up to 4 dims * 8 bytes = 32 bytes)
+    lea rdi, [rbp - 48]         ; destination for 64-bit shape
+    lea rsi, [rel io_buffer]    ; source of 32-bit dims
+    mov ecx, r12d               ; ndim
+    xor r14, r14                ; total elements = 1
+    mov r14d, 1
     
-.calc_size:
+.convert_dims:
     test ecx, ecx
-    jz .size_done
-    mov eax, [rsi]
-    imul r14d, eax
+    jz .dims_converted
+    
+    mov eax, [rsi]              ; read 32-bit dim
+    mov [rdi], rax              ; store as 64-bit (zero-extended)
+    imul r14d, eax              ; accumulate total
+    
     add rsi, 4
+    add rdi, 8
     dec ecx
-    jmp .calc_size
+    jmp .convert_dims
     
-.size_done:
+.dims_converted:
     ; r14d = total elements
+    mov [rbp - 64], r14         ; save total elements
     
-    ; Allocate tensor structure (64 bytes)
-    mov edi, 64
-    call mem_alloc
+    ; Now create tensor properly using tensor_create
+    mov rdi, [rbp - 56]         ; ndim (64-bit)
+    lea rsi, [rbp - 48]         ; shape array pointer (64-bit values)
+    mov edx, 0                  ; dtype = DT_FLOAT32
+    call tensor_create
     
     test rax, rax
     jz .read_tensor_error
-    
     mov r15, rax                ; tensor pointer
     
-    ; Store ndim
-    mov [r15 + 8], r12d
-    
-    ; Copy dimensions
-    lea rdi, [r15 + 12]
-    lea rsi, [rel io_buffer]
-    mov ecx, r12d
-    
-.copy_read_dims:
-    test ecx, ecx
-    jz .dims_read_done
-    mov eax, [rsi]
-    mov [rdi], eax
-    add rsi, 4
-    add rdi, 4
-    dec ecx
-    jmp .copy_read_dims
-    
-.dims_read_done:
-    ; Allocate data buffer
+    ; Read tensor data directly into tensor's data buffer
+    mov r14, [rbp - 64]         ; total elements
     mov eax, r14d
     shl eax, 2                  ; * 4 for float32
-    mov edi, eax
-    add edi, 32                 ; alignment padding
-    call mem_alloc
-    
-    test rax, rax
-    jz .read_tensor_error
-    
-    ; Align to 32 bytes
-    add rax, 31
-    and rax, ~31
-    mov [r15], rax              ; data pointer
-    
-    ; Read tensor data
-    mov eax, r14d
-    shl eax, 2
     mov r13d, eax               ; bytes to read
     
-    mov rax, 0
+    mov rax, 0                  ; sys_read
     mov rdi, [rel current_fd]
-    mov rsi, [r15]
+    mov rsi, [r15]              ; TENSOR_DATA (offset 0)
     mov edx, r13d
     syscall
     
     cmp eax, r13d
-    jne .read_tensor_error
+    jne .read_tensor_error_cleanup
     
-    ; Set other tensor fields
-    mov dword [r15 + 44], 0     ; requires_grad = false
-    mov qword [r15 + 48], 0     ; grad = null
-    
-    ; Calculate strides
-    mov eax, r12d               ; ndim
-    lea rdi, [r15 + 28]         ; strides array
-    lea rsi, [r15 + 12]         ; dims array
-    
-    ; Stride of last dim = 1
-    mov ecx, r12d
-    dec ecx
-    lea rdx, [rdi + rcx*4]
-    mov dword [rdx], 1
-    
-    ; Calculate remaining strides
-    dec ecx
-    js .strides_done
-    
-.calc_strides:
-    ; strides[i] = strides[i+1] * dims[i+1]
-    lea rdx, [rdi + rcx*4]      ; &strides[i]
-    mov eax, [rdx + 4]          ; strides[i+1]
-    
-    lea r8, [rsi + rcx*4]
-    mov r9d, [r8 + 4]           ; dims[i+1]
-    imul eax, r9d
-    mov [rdx], eax
-    
-    dec ecx
-    jns .calc_strides
-    
-.strides_done:
-    mov rax, r15
+    mov rax, r15                ; return tensor pointer
     jmp .read_tensor_cleanup
+    
+.read_tensor_error_cleanup:
+    ; Free the tensor we allocated
+    mov rdi, r15
+    call tensor_free
     
 .read_tensor_error:
     xor eax, eax
     
 .read_tensor_cleanup:
-    add rsp, 48
+    add rsp, 80
     pop r15
     pop r14
     pop r13
@@ -1147,5 +1256,251 @@ print_error:
     pop rbx
     pop rbp
     ret
+
+; =============================================================================
+; Forward functions for loaded models
+; These are simplified versions that work with loaded Module structures
+; =============================================================================
+
+; linear_forward_loaded - Forward pass for loaded Linear layer
+; Arguments:
+;   rdi - Module pointer (with params[0]=weight, params[1]=bias)
+;   rsi - input Node
+;   rdx - output Node pointer (for compatibility with activation signature)
+; Returns:
+;   rax - output Node (or 0 on error)
+linear_forward_loaded:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 40
+    
+    mov r12, rdi                ; Module
+    mov r13, rsi                ; input node
+    mov [rbp - 40], rdx         ; output pointer (optional)
+    
+    ; Get weight and bias tensors from params
+    mov rax, [r12 + 8]          ; params array
+    test rax, rax
+    jz .linear_loaded_error
+    
+    mov r14, [rax]              ; weight tensor
+    mov r15, [rax + 8]          ; bias tensor (may be NULL)
+    
+    ; Get input tensor from node
+    mov rax, [r13]              ; NODE_VALUE = input tensor
+    test rax, rax
+    jz .linear_loaded_error
+    mov rbx, rax                ; input tensor
+    
+    ; Compute output = input @ weight^T + bias
+    ; For simplicity, create output tensor first
+    ; Get output dimensions from weight: [out_features, in_features]
+    mov rax, [r14 + 16]         ; weight shape pointer
+    test rax, rax
+    jz .linear_loaded_error
+    
+    ; Create output tensor with shape [batch_size, out_features]
+    mov rcx, [rbx + 16]         ; input shape pointer
+    test rcx, rcx
+    jz .linear_loaded_error
+    
+    ; Get batch_size from input shape[0]
+    mov r8, [rcx]               ; batch_size (or in_features if 1D)
+    
+    ; Get out_features from weight shape[0]
+    mov r9, [rax]               ; out_features
+    
+    ; For now, do a simple matrix multiply
+    ; output = matmul(input, weight^T)
+    mov rdi, rbx                ; input tensor
+    mov rsi, r14                ; weight tensor  
+    call matmul
+    
+    test rax, rax
+    jz .linear_loaded_error
+    mov rbx, rax                ; output tensor
+    
+    ; Add bias if present
+    test r15, r15
+    jz .linear_loaded_no_bias
+    
+    mov rdi, rbx                ; output tensor
+    mov rsi, r15                ; bias tensor
+    call ew_add
+    test rax, rax
+    jz .linear_loaded_error
+    mov rbx, rax
+    
+.linear_loaded_no_bias:
+    ; Create output node
+    mov rdi, rbx                ; output tensor
+    mov rsi, 1                  ; requires_grad = true for training compatibility
+    call node_create
+    
+    test rax, rax
+    jz .linear_loaded_error
+    
+    ; Store output if pointer provided
+    mov rdx, [rbp - 40]
+    test rdx, rdx
+    jz .linear_loaded_done
+    mov [rdx], rax
+    xor eax, eax                ; return 0 for success (activation convention)
+    jmp .linear_loaded_cleanup
+    
+.linear_loaded_done:
+    ; Return node directly
+    jmp .linear_loaded_cleanup
+    
+.linear_loaded_error:
+    xor eax, eax
+    
+.linear_loaded_cleanup:
+    add rsp, 40
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+; activation_relu_forward - ReLU forward for loaded model
+; Arguments:
+;   rdi - Module pointer (unused)
+;   rsi - input Node
+;   rdx - output Node pointer
+; Returns:
+;   rax - 0 on success, -1 on error
+activation_relu_forward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    sub rsp, 8
+    
+    mov rbx, rdx                ; save output pointer
+    mov rdi, rsi                ; input node
+    call node_relu
+    
+    test rax, rax
+    jz .relu_fwd_error
+    
+    mov [rbx], rax              ; store output node
+    xor eax, eax                ; return 0 = success
+    jmp .relu_fwd_done
+    
+.relu_fwd_error:
+    mov eax, -1
+    
+.relu_fwd_done:
+    add rsp, 8
+    pop rbx
+    pop rbp
+    ret
+
+; activation_sigmoid_forward - Sigmoid forward for loaded model
+; Arguments:
+;   rdi - Module pointer (unused)
+;   rsi - input Node
+;   rdx - output Node pointer
+; Returns:
+;   rax - 0 on success, -1 on error
+activation_sigmoid_forward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    sub rsp, 8
+    
+    mov rbx, rdx                ; save output pointer
+    mov rdi, rsi                ; input node
+    call node_sigmoid
+    
+    test rax, rax
+    jz .sigmoid_fwd_error
+    
+    mov [rbx], rax              ; store output node
+    xor eax, eax                ; return 0 = success
+    jmp .sigmoid_fwd_done
+    
+.sigmoid_fwd_error:
+    mov eax, -1
+    
+.sigmoid_fwd_done:
+    add rsp, 8
+    pop rbx
+    pop rbp
+    ret
+
+; activation_tanh_forward - Tanh forward for loaded model
+; Arguments:
+;   rdi - Module pointer (unused)
+;   rsi - input Node
+;   rdx - output Node pointer
+; Returns:
+;   rax - 0 on success, -1 on error
+activation_tanh_forward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    sub rsp, 8
+    
+    mov rbx, rdx                ; save output pointer
+    mov rdi, rsi                ; input node
+    call node_tanh
+    
+    test rax, rax
+    jz .tanh_fwd_error
+    
+    mov [rbx], rax              ; store output node
+    xor eax, eax                ; return 0 = success
+    jmp .tanh_fwd_done
+    
+.tanh_fwd_error:
+    mov eax, -1
+    
+.tanh_fwd_done:
+    add rsp, 8
+    pop rbx
+    pop rbp
+    ret
+
+; activation_softmax_forward - Softmax forward for loaded model
+; Arguments:
+;   rdi - Module pointer (unused)
+;   rsi - input Node
+;   rdx - output Node pointer
+; Returns:
+;   rax - 0 on success, -1 on error
+activation_softmax_forward:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    sub rsp, 8
+    
+    mov rbx, rdx                ; save output pointer
+    mov rdi, rsi                ; input node
+    call node_softmax
+    
+    test rax, rax
+    jz .softmax_fwd_error
+    
+    mov [rbx], rax              ; store output node
+    xor eax, eax                ; return 0 = success
+    jmp .softmax_fwd_done
+    
+.softmax_fwd_error:
+    mov eax, -1
+    
+.softmax_fwd_done:
+    add rsp, 8
+    pop rbx
+    pop rbp
+    ret
+
 ; Mark stack as non-executable
 section .note.GNU-stack noalloc noexec nowrite progbits
