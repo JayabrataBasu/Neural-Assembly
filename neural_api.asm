@@ -39,6 +39,18 @@ section .data
     NEURAL_ERR_NOT_IMPLEMENTED  equ 14
     NEURAL_ERR_INTERNAL         equ 15
 
+    ; Module struct offsets (from nn_layers.asm)
+    MODULE_PARAMS       equ 8
+    MODULE_FORWARD_FN   equ 24
+    
+    ; Tensor struct offsets
+    TENSOR_DATA         equ 0
+    TENSOR_SHAPE        equ 8
+    TENSOR_STRIDE       equ 16
+    TENSOR_NDIM         equ 24
+    TENSOR_DTYPE        equ 32
+    TENSOR_FLAGS        equ 36
+
 section .bss
     align 8
     last_error:         resd 1
@@ -2140,62 +2152,28 @@ neural_linear_weight:
     pop rbp
     ret
 
-neural_linear_free:
+neural_mse_loss:
     push rbp
     mov rbp, rsp
     
     test rdi, rdi
-    jz .done
-    
-    call module_free
-    
-.done:
-    pop rbp
-    ret
-
-neural_linear_forward:
-    push rbp
-    mov rbp, rsp
-    
-    test rdi, rdi
-    jz .null
+    jz .mse_null
     test rsi, rsi
-    jz .null
+    jz .mse_null
     test rdx, rdx
-    jz .null
-    
-    call [rdi + MODULE_FORWARD_FN]
-    mov dword [rel last_error], NEURAL_OK
-    jmp .done
-
-.null:
-    mov eax, NEURAL_ERR_NULL_POINTER
-    mov [rel last_error], eax
-
-.done:
-    pop rbp
-    ret
-    push rbp
-    mov rbp, rsp
-    
-    test rdi, rdi
-    jz .null
-    test rsi, rsi
-    jz .null
-    test rdx, rdx
-    jz .null
+    jz .mse_null
     
     call mse_loss
     
     xor eax, eax
     mov dword [rel last_error], NEURAL_OK
-    jmp .done
+    jmp .mse_done
 
-.null:
+.mse_null:
     mov eax, NEURAL_ERR_NULL_POINTER
     mov [rel last_error], eax
 
-.done:
+.mse_done:
     pop rbp
     ret
 
@@ -2252,137 +2230,8 @@ neural_optimizer_zero_grad:
     ret
 
 ; =============================================================================
-; Sequential Container API Functions
+; Node/Autograd API Functions
 ; =============================================================================
-
-neural_sequential_create:
-    push rbp
-    mov rbp, rsp
-    
-    call neural_sequential_create
-    test rax, rax
-    jz .error
-    
-    mov dword [rel last_error], NEURAL_OK
-    jmp .done
-
-.error:
-    mov dword [rel last_error], NEURAL_ERR_OUT_OF_MEMORY
-    xor eax, eax
-
-.done:
-    pop rbp
-    ret
-
-neural_sequential_free:
-    push rbp
-    mov rbp, rsp
-    
-    test rdi, rdi
-    jz .done
-    
-    call neural_sequential_free
-    
-.done:
-    pop rbp
-    ret
-
-neural_sequential_add:
-    push rbp
-    mov rbp, rsp
-    
-    test rdi, rdi
-    jz .null
-    test rsi, rsi
-    jz .null
-    
-    call neural_sequential_add
-    mov dword [rel last_error], NEURAL_OK
-    jmp .done
-
-.null:
-    mov eax, NEURAL_ERR_NULL_POINTER
-    mov [rel last_error], eax
-
-.done:
-    pop rbp
-    ret
-
-neural_sequential_forward:
-    push rbp
-    mov rbp, rsp
-    
-    test rdi, rdi
-    jz .null
-    test rsi, rsi
-    jz .null
-    test rdx, rdx
-    jz .null
-    
-    call neural_sequential_forward
-    mov dword [rel last_error], NEURAL_OK
-    jmp .done
-
-.null:
-    mov eax, NEURAL_ERR_NULL_POINTER
-    mov [rel last_error], eax
-
-.done:
-    pop rbp
-    ret
-
-neural_sequential_size:
-    push rbp
-    mov rbp, rsp
-    
-    test rdi, rdi
-    jz .null
-    
-    call neural_sequential_size
-    jmp .done
-
-.null:
-    xor eax, eax
-
-.done:
-    pop rbp
-    ret
-
-neural_sequential_get:
-    push rbp
-    mov rbp, rsp
-    
-    test rdi, rdi
-    jz .null
-    
-    call neural_sequential_get
-    jmp .done
-
-.null:
-    xor eax, eax
-
-.done:
-    pop rbp
-    ret
-
-neural_sequential_parameters:
-    push rbp
-    mov rbp, rsp
-    
-    test rdi, rdi
-    jz .null
-    test rsi, rsi
-    jz .null
-    
-    call neural_sequential_parameters
-    jmp .done
-
-.null:
-    mov rax, -1
-
-.done:
-    pop rbp
-    ret
 
 neural_node_create:
     push rbp

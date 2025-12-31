@@ -230,13 +230,27 @@ _lib.neural_cross_entropy_loss.argtypes = [
 
 # Dataset
 _lib.neural_dataset_load_csv.restype = ctypes.c_void_p
-_lib.neural_dataset_load_csv.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+_lib.neural_dataset_load_csv.argtypes = [
+    ctypes.c_char_p,   # data_path
+    ctypes.c_char_p,   # labels_path
+    ctypes.c_uint64,   # n_features
+    ctypes.c_uint32,   # dtype
+]
 
 _lib.neural_dataset_free.restype = None
 _lib.neural_dataset_free.argtypes = [ctypes.c_void_p]
 
 _lib.neural_dataset_size.restype = ctypes.c_uint64
 _lib.neural_dataset_size.argtypes = [ctypes.c_void_p]
+
+_lib.neural_dataset_get_batch.restype = ctypes.c_int
+_lib.neural_dataset_get_batch.argtypes = [
+    ctypes.c_void_p,                         # dataset
+    ctypes.c_uint64,                         # batch_index
+    ctypes.c_uint64,                         # batch_size
+    ctypes.POINTER(ctypes.c_void_p),         # out_x
+    ctypes.POINTER(ctypes.c_void_p),         # out_y
+]
 
 # Config
 _lib.neural_config_load.restype = ctypes.c_void_p

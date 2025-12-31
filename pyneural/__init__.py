@@ -29,7 +29,16 @@ Example Usage:
 from .tensor import Tensor
 from .nn import Linear, ReLU, Sigmoid, Softmax, Sequential
 from .optim import SGD, Adam
-from .autograd import no_grad, enable_grad
+from .autograd import (
+    no_grad,
+    enable_grad,
+    is_grad_enabled,
+    set_grad_enabled,
+    inference_mode,
+    register_hook,
+    remove_hook,
+    clear_hooks,
+)
 from .core import (
     init,
     shutdown,
@@ -40,7 +49,15 @@ from .core import (
     get_simd_level,
     get_simd_name,
 )
-from .dataset import Dataset
+from .dataset import (
+    Dataset,
+    DataLoader,
+    TensorDataset,
+    Sampler,
+    SequentialSampler,
+    RandomSampler,
+    BatchSampler,
+)
 from .config import Config
 
 __version__ = "1.0.0"
@@ -68,7 +85,19 @@ __all__ = [
     # Autograd
     "no_grad",
     "enable_grad",
+    "is_grad_enabled",
+    "set_grad_enabled",
+    "inference_mode",
+    "register_hook",
+    "remove_hook",
+    "clear_hooks",
     # Data
     "Dataset",
+    "DataLoader",
+    "TensorDataset",
+    "Sampler",
+    "SequentialSampler",
+    "RandomSampler",
+    "BatchSampler",
     "Config",
 ]

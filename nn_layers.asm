@@ -105,6 +105,7 @@ extern tensor_free
 extern tensor_numel
 extern tensor_fill
 extern node_create
+extern node_free
 extern node_matmul
 extern node_add
 extern ew_add
@@ -1425,10 +1426,32 @@ module_free:
     call mem_free
 
 .skip_params:
-    ; Free param_nodes array (nodes should be freed by autograd)
-    mov rdi, [r12 + MODULE_PARAM_NODES]
-    test rdi, rdi
+    ; Free param_nodes array and the nodes themselves
+    mov rbx, [r12 + MODULE_PARAM_NODES]
+    test rbx, rbx
     jz .skip_nodes
+    
+    ; Free each node in the array
+    mov ecx, [r12 + MODULE_N_PARAMS]
+    xor r13d, r13d
+.free_nodes_loop:
+    cmp r13d, ecx
+    jge .free_nodes_array
+    
+    mov rdi, [rbx + r13*8]
+    test rdi, rdi
+    jz .next_node
+    push rcx
+    push rbx
+    call node_free
+    pop rbx
+    pop rcx
+.next_node:
+    inc r13d
+    jmp .free_nodes_loop
+
+.free_nodes_array:
+    mov rdi, rbx
     call mem_free
 
 .skip_nodes:

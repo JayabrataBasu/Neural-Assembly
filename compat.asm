@@ -31,7 +31,6 @@ extern time
     global tanh_forward
     global dataset_load
     global dataset_size
-    global optimizer_step
     global mem_init
     global xorshift_seed
     global xorshift64
@@ -76,13 +75,16 @@ dataset_load:
     xor rax, rax
     ret
 
-; dataset_size - placeholder (returns 0)
+; dataset_size - return number of samples in dataset
+; RDI = dataset*
+; Returns: RAX = n_samples
+%define DATASET_N_SAMPLES   0
 dataset_size:
-    xor eax, eax
+    test rdi, rdi
+    jz .null
+    mov rax, [rdi + DATASET_N_SAMPLES]
     ret
-
-; optimizer_step - placeholder (does nothing, returns 0)
-optimizer_step:
+.null:
     xor eax, eax
     ret
 

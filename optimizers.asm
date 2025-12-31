@@ -91,6 +91,7 @@ global optimizer_save_state
 global optimizer_load_state
 global clip_grad_norm_
 global clip_grad_value_
+global optimizer_step
 
 ; AdamW optimizer globals
 global adamw_create
@@ -2021,6 +2022,30 @@ adamw_step:
 ; =============================================================================
 adamw_zero_grad:
     jmp sgd_zero_grad               ; Same implementation
+
+; =============================================================================
+; optimizer_step - Generic optimizer step (calls through function pointer)
+; Arguments:
+;   RDI = Optimizer* opt
+; =============================================================================
+optimizer_step:
+    push rbp
+    mov rbp, rsp
+    push r12
+    
+    mov r12, rdi                    ; optimizer
+    
+    ; Call through function pointer at OPT_STEP_FN (offset 24)
+    mov rax, [r12 + OPT_STEP_FN]
+    test rax, rax
+    jz .done
+    mov rdi, r12
+    call rax
+    
+.done:
+    pop r12
+    pop rbp
+    ret
 
 ; Mark stack as non-executable
 section .note.GNU-stack noalloc noexec nowrite progbits

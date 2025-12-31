@@ -225,6 +225,7 @@ section .text
     
     ; Autograd nodes
     extern node_create
+    extern node_free
     extern node_free_graph
     
     ; Math kernels (element-wise)
@@ -233,6 +234,7 @@ section .text
     ; Neural network layers
     extern linear_create
     extern linear_forward
+    extern module_free
     extern linear_backward
     extern relu_forward
     extern relu_backward
@@ -3654,7 +3656,43 @@ run_gradient_checks:
     lea rdi, [rel msg_test_done]
     call print_string
     
-    ; Cleanup
+    ; Cleanup - free all allocated objects
+    ; Free tensor c (if created)
+    mov rdi, [rsp+16]
+    test rdi, rdi
+    jz .skip_clean_c
+    call tensor_free
+.skip_clean_c:
+    
+    ; Free tensor b (rbx)
+    test rbx, rbx
+    jz .skip_clean_b
+    mov rdi, rbx
+    call tensor_free
+.skip_clean_b:
+    
+    ; Free tensor a (r15)
+    test r15, r15
+    jz .skip_clean_a
+    mov rdi, r15
+    call tensor_free
+.skip_clean_a:
+    
+    ; Free autograd node (r14)
+    test r14, r14
+    jz .skip_clean_node
+    mov rdi, r14
+    call node_free
+.skip_clean_node:
+    
+    ; Free linear layer (r13) using module_free
+    test r13, r13
+    jz .skip_clean_linear
+    mov rdi, r13
+    call module_free
+.skip_clean_linear:
+    
+    ; Free initial tensor (r12)
     test r12, r12
     jz .skip_clean1
     mov rdi, r12
