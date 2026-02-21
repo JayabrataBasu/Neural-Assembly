@@ -51,9 +51,17 @@ This project implements a complete neural network training framework in pure x86
 
 - **Optimizers** (`optimizers.asm`)
   - SGD with momentum
-  - Adam
-  - Learning rate scheduler (StepLR)
+  - Adam / AdamW
+  - Runtime learning rate get/set
   - Optimizer state save/load
+
+- **Training Ops** (`training_ops.asm`) — *NEW in v1.1*
+  - Confusion matrix update & per-class precision/recall/F1 (assembly)
+  - LR schedules: step decay, exponential decay, cosine annealing (assembly)
+  - NaN/Inf detection on float32 tensors (assembly, parity-flag trick)
+  - Gradient L2 norm (SSE-vectorized sum-of-squares + sqrtss)
+  - Dropout forward/backward (inverted, with mask) (assembly)
+  - Weight initialization: He/Kaiming, Xavier/Glorot uniform & normal (assembly)
 
 - **Data Loading** (`dataset.asm`)
   - CSV file parsing
@@ -403,25 +411,25 @@ This is an educational project demonstrating low-level ML implementation. Contri
 
 ## Feature Roadmap
 
-Planned features for future development, ordered by priority:
+Status of planned features (ordered by priority):
 
-### High Priority
-- **Confusion Matrix & Per-Class Metrics** — Precision, recall, F1-score per class for multi-class problems (essential for imbalanced datasets like Wine Quality)
-- **Early Stopping** — Monitor validation loss, stop training when it stagnates (patience-based), save best model checkpoint automatically
-- **Learning Rate Scheduling** — Step decay, exponential decay, cosine annealing, and warmup schedules (currently only fixed LR decay in SGD)
-- **NaN/Inf Detection** — Guard against numerical instability during training; log warnings and optionally halt on first NaN gradient
+### High Priority — ✅ All Complete (v1.1)
+- ✅ **Confusion Matrix & Per-Class Metrics** — Precision, recall, F1-score per class; assembly-backed (`training_ops.asm`)
+- ✅ **Early Stopping** — Monitor validation loss, patience-based stopping (`pyneural/training.py`)
+- ✅ **Learning Rate Scheduling** — Step decay, exponential decay, cosine annealing, warmup, ReduceLROnPlateau; math in assembly
+- ✅ **NaN/Inf Detection** — Assembly `tensor_has_nan`/`tensor_has_inf` with parity-flag trick; Python `NaNDetector` wrapper
 
-### Medium Priority  
-- **Gradient Norm Logging** — Track and optionally log L2 norm of gradients per layer each epoch for diagnosing vanishing/exploding gradients
-- **Class-Balanced Sampling** — Weighted random sampling for imbalanced datasets; oversampling minority classes during batch construction
-- **Weight Initialization Strategies** — He/Kaiming init for ReLU networks, Xavier/Glorot for sigmoid/tanh (currently using random uniform)
-- **Dropout Regularization** — Inverted dropout during training with automatic disable at inference time
+### Medium Priority — ✅ Complete
+- ✅ **Gradient Norm Logging** — SSE-vectorized L2 norm (`tensor_grad_l2_norm` in assembly)
+- ✅ **Weight Initialization Strategies** — He/Kaiming & Xavier/Glorot, uniform & normal variants (assembly `init_he_uniform` etc.)
+- ✅ **Dropout Regularization** — Inverted dropout forward/backward in assembly (`dropout_forward`/`dropout_backward`)
+- ✅ **Class-Balanced Sampling** — Assembly `compute_class_weights`/`compute_sample_weights`/`weighted_sample_indices`; Python `WeightedRandomSampler`
 
 ### Future
-- **Additional Datasets** — Iris (simple baseline), CIFAR-10 (image classification), Boston Housing (regression)
-- **TensorBoard-Compatible Logging** — Write TFEvent files for loss/accuracy visualization
-- **Model Pruning** — Magnitude-based weight pruning for smaller models
-- **Quantization** — INT8 inference with calibration for faster forward pass
+- 🔲 **Additional Datasets** — ✅ Iris (4→16→3, `prepare_iris.py`), 🔲 CIFAR-10 (image classification), 🔲 Boston Housing (regression)
+- 🔲 **TensorBoard-Compatible Logging** — Write TFEvent files for loss/accuracy visualization
+- 🔲 **Model Pruning** — Magnitude-based weight pruning for smaller models
+- 🔲 **Quantization** — INT8 inference with calibration for faster forward pass
 
 ## License
 

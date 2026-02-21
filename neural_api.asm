@@ -145,6 +145,11 @@ extern init_he_normal
 extern init_xavier_normal
 extern init_kaiming_uniform
 
+; Class-balanced sampling (training_ops.asm)
+extern compute_class_weights
+extern compute_sample_weights
+extern weighted_sample_indices
+
 ; Optimizer LR access (optimizers.asm)
 extern optimizer_set_lr
 extern optimizer_get_lr
@@ -278,6 +283,11 @@ global neural_init_xavier_normal
 global neural_init_kaiming_uniform
 global neural_optimizer_set_lr
 global neural_optimizer_get_lr
+
+; Class-balanced sampling API
+global neural_compute_class_weights
+global neural_compute_sample_weights
+global neural_weighted_sample_indices
 
 ; =============================================================================
 ; neural_init - Initialize the framework
@@ -2720,3 +2730,15 @@ neural_optimizer_set_lr:
 ; neural_optimizer_get_lr(opt) -> xmm0=lr
 neural_optimizer_get_lr:
     jmp optimizer_get_lr
+
+; neural_compute_class_weights(labels, n, num_classes, weights_out)
+neural_compute_class_weights:
+    jmp compute_class_weights
+
+; neural_compute_sample_weights(labels, n, class_weights, num_classes, sample_weights_out)
+neural_compute_sample_weights:
+    jmp compute_sample_weights
+
+; neural_weighted_sample_indices(sample_weights, n_in, n_out, indices_out, seed)
+neural_weighted_sample_indices:
+    jmp weighted_sample_indices

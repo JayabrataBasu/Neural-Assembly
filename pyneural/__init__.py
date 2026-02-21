@@ -56,6 +56,7 @@ from .dataset import (
     Sampler,
     SequentialSampler,
     RandomSampler,
+    WeightedRandomSampler,
     BatchSampler,
 )
 from .config import Config

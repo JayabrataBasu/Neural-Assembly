@@ -302,6 +302,39 @@ def demo_trainer():
 
 
 # ──────────────────────────────────────────────────────────────
+# 8. Class-Balanced Sampling
+# ──────────────────────────────────────────────────────────────
+
+def demo_class_balanced_sampling():
+    banner("8. Class-Balanced Sampling (Assembly)")
+
+    from collections import Counter
+
+    # Highly imbalanced dataset: 100 class-0, 10 class-1, 5 class-2
+    labels = [0] * 100 + [1] * 10 + [2] * 5
+    print(f"  Original distribution: {Counter(labels)}")
+
+    sampler = pn.WeightedRandomSampler(labels, num_classes=3, num_samples=300, seed=42)
+    indices = list(sampler)
+    sampled_labels = [labels[i] for i in indices]
+    counts = Counter(sampled_labels)
+    print(f"  Sampled distribution:  {counts}")
+
+    # Check that minority classes are oversampled (ratio > 0.5)
+    ratio_2_to_0 = counts.get(2, 0) / max(counts.get(0, 1), 1)
+    ratio_1_to_0 = counts.get(1, 0) / max(counts.get(0, 1), 1)
+    print(f"  Class 2/Class 0 ratio: {ratio_2_to_0:.2f} (target ~1.0)")
+    print(f"  Class 1/Class 0 ratio: {ratio_1_to_0:.2f} (target ~1.0)")
+
+    assert ratio_2_to_0 > 0.4, f"Class 2 under-sampled: ratio={ratio_2_to_0}"
+    assert ratio_1_to_0 > 0.4, f"Class 1 under-sampled: ratio={ratio_1_to_0}"
+    assert len(indices) == 300
+    assert all(0 <= i < len(labels) for i in indices)
+
+    print("\n✓ Class-balanced sampling test passed")
+
+
+# ──────────────────────────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────────────────────────
 
@@ -322,6 +355,7 @@ def main():
     demo_grad_norm()
     demo_weight_init()
     demo_trainer()
+    demo_class_balanced_sampling()
 
     banner("ALL FEATURE DEMOS PASSED ✓")
     print("The following features are fully implemented with assembly backends:")
@@ -333,6 +367,7 @@ def main():
     print("  • Weight initialization: He/Kaiming, Xavier/Glorot (uniform & normal)")
     print("  • Dropout forward/backward (inverted)")
     print("  • Trainer orchestrator with all features composed")
+    print("  • Class-balanced sampling for imbalanced datasets")
 
 
 if __name__ == "__main__":

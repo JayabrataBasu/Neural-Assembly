@@ -442,6 +442,33 @@ _lib.neural_optimizer_get_lr.argtypes = [
     ctypes.c_void_p,   # Optimizer* opt
 ]
 
+# Class-balanced sampling
+_lib.neural_compute_class_weights.restype = ctypes.c_int
+_lib.neural_compute_class_weights.argtypes = [
+    ctypes.c_void_p,   # int32_t* labels
+    ctypes.c_uint64,   # n
+    ctypes.c_uint64,   # num_classes
+    ctypes.c_void_p,   # double* weights_out
+]
+
+_lib.neural_compute_sample_weights.restype = ctypes.c_int
+_lib.neural_compute_sample_weights.argtypes = [
+    ctypes.c_void_p,   # int32_t* labels
+    ctypes.c_uint64,   # n
+    ctypes.c_void_p,   # double* class_weights
+    ctypes.c_uint64,   # num_classes
+    ctypes.c_void_p,   # double* sample_weights_out
+]
+
+_lib.neural_weighted_sample_indices.restype = ctypes.c_int
+_lib.neural_weighted_sample_indices.argtypes = [
+    ctypes.c_void_p,   # double* sample_weights
+    ctypes.c_uint64,   # n_in
+    ctypes.c_uint64,   # n_out
+    ctypes.c_void_p,   # int32_t* indices_out
+    ctypes.c_int,      # seed
+]
+
 
 def _check_error(result: int, operation: str = "operation"):
     """Check result code and raise exception if error."""

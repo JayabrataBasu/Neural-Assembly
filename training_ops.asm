@@ -1245,3 +1245,270 @@ init_xavier_normal:
     add rsp, 8
     pop rbp
     ret
+
+
+; =============================================================================
+; SECTION 6: Class-Balanced Sampling
+; =============================================================================
+
+; compute_class_weights - Compute inverse-frequency weights for each class
+;
+; weight[c] = total_samples / (num_classes * count[c])
+; If count[c] == 0, weight[c] = 0.
+;
+; Args:
+;   RDI = int32_t* labels (array of class labels, length n)
+;   RSI = uint64_t n (number of samples)
+;   RDX = uint64_t num_classes
+;   RCX = double* weights_out (output array, length num_classes)
+; Returns:
+;   EAX = 0 on success
+; =============================================================================
+global compute_class_weights
+compute_class_weights:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 8
+
+    mov r12, rdi                ; labels
+    mov r13, rsi                ; n
+    mov r14, rdx                ; num_classes
+    mov r15, rcx                ; weights_out
+
+    ; Allocate temp count array on stack (num_classes * 8 bytes)
+    mov rax, r14
+    shl rax, 3                  ; * 8
+    sub rsp, rax
+    mov rbx, rsp                ; counts = rsp
+
+    ; Zero out counts
+    xor ecx, ecx
+.cw_zero:
+    cmp rcx, r14
+    jge .cw_count
+    mov qword [rbx + rcx*8], 0
+    inc rcx
+    jmp .cw_zero
+
+.cw_count:
+    ; Count occurrences of each class
+    xor ecx, ecx
+.cw_count_loop:
+    cmp rcx, r13
+    jge .cw_compute
+    movsxd rax, dword [r12 + rcx*4]   ; label
+    ; bounds check
+    test rax, rax
+    js .cw_count_skip
+    cmp rax, r14
+    jge .cw_count_skip
+    inc qword [rbx + rax*8]
+.cw_count_skip:
+    inc rcx
+    jmp .cw_count_loop
+
+.cw_compute:
+    ; weight[c] = n / (num_classes * count[c])
+    xor ecx, ecx
+.cw_weight_loop:
+    cmp rcx, r14
+    jge .cw_done
+
+    mov rax, [rbx + rcx*8]     ; count[c]
+    test rax, rax
+    jz .cw_weight_zero
+
+    ; denominator = num_classes * count[c]
+    imul rax, r14               ; num_classes * count[c]
+    cvtsi2sd xmm0, r13          ; n (double)
+    cvtsi2sd xmm1, rax          ; denominator (double)
+    divsd xmm0, xmm1            ; n / (num_classes * count[c])
+    movsd [r15 + rcx*8], xmm0
+    jmp .cw_weight_next
+
+.cw_weight_zero:
+    vxorpd xmm0, xmm0, xmm0
+    movsd [r15 + rcx*8], xmm0
+
+.cw_weight_next:
+    inc rcx
+    jmp .cw_weight_loop
+
+.cw_done:
+    ; Restore stack
+    mov rax, r14
+    shl rax, 3
+    add rsp, rax
+
+    xor eax, eax
+    add rsp, 8
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+
+
+; compute_sample_weights - Compute per-sample weight from class weights
+;
+; sample_weight[i] = class_weight[label[i]]
+;
+; Args:
+;   RDI = int32_t* labels (array of class labels, length n)
+;   RSI = uint64_t n
+;   RDX = double* class_weights (length num_classes)
+;   RCX = uint64_t num_classes
+;   R8  = double* sample_weights_out (length n)
+; Returns:
+;   EAX = 0 on success
+; =============================================================================
+global compute_sample_weights
+compute_sample_weights:
+    push rbp
+    mov rbp, rsp
+    push rbx
+
+    mov rbx, rdi                ; labels
+    ; rsi = n, rdx = class_weights, rcx = num_classes, r8 = out
+
+    xor eax, eax                ; i = 0
+.sw_loop:
+    cmp rax, rsi
+    jge .sw_done
+
+    movsxd r9, dword [rbx + rax*4]     ; label
+    ; bounds check
+    test r9, r9
+    js .sw_zero
+    cmp r9, rcx
+    jge .sw_zero
+
+    movsd xmm0, [rdx + r9*8]           ; class_weight[label]
+    movsd [r8 + rax*8], xmm0
+    jmp .sw_next
+
+.sw_zero:
+    vxorpd xmm0, xmm0, xmm0
+    movsd [r8 + rax*8], xmm0
+
+.sw_next:
+    inc rax
+    jmp .sw_loop
+
+.sw_done:
+    xor eax, eax
+    pop rbx
+    pop rbp
+    ret
+
+
+; weighted_sample_indices - Sample n_out indices with replacement using weights
+;
+; Uses cumulative distribution + uniform random for weighted sampling.
+;
+; Args:
+;   RDI = double* sample_weights (length n_in)
+;   RSI = uint64_t n_in (total number of samples)
+;   RDX = uint64_t n_out (number of indices to sample)
+;   RCX = int32_t* indices_out (output, length n_out)
+;   R8D = seed (0 = time-based)
+; Returns:
+;   EAX = 0 on success
+; =============================================================================
+global weighted_sample_indices
+weighted_sample_indices:
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    sub rsp, 24
+
+    mov r12, rdi                ; sample_weights
+    mov r13, rsi                ; n_in
+    mov r14, rdx                ; n_out
+    mov r15, rcx                ; indices_out
+
+    ; Seed RNG
+    test r8d, r8d
+    jnz .ws_use_seed
+    xor edi, edi
+    call time wrt ..plt
+    mov edi, eax
+    jmp .ws_do_seed
+.ws_use_seed:
+    mov edi, r8d
+.ws_do_seed:
+    call srand wrt ..plt
+
+    ; Compute total weight
+    xorpd xmm2, xmm2           ; total = 0
+    xor ecx, ecx
+.ws_total_loop:
+    cmp rcx, r13
+    jge .ws_total_done
+    addsd xmm2, [r12 + rcx*8]
+    inc rcx
+    jmp .ws_total_loop
+.ws_total_done:
+    movsd [rsp], xmm2           ; save total weight
+
+    ; For each output index, sample using cumulative weights
+    xor ebx, ebx                ; out_idx = 0
+.ws_sample_loop:
+    cmp rbx, r14
+    jge .ws_done
+
+    ; Generate uniform random in [0, total_weight)
+    push rbx
+    call rand wrt ..plt
+    pop rbx
+    cvtsi2sd xmm0, eax
+    mov eax, 0x7FFFFFFF
+    cvtsi2sd xmm1, eax
+    divsd xmm0, xmm1            ; u in [0, 1)
+    mulsd xmm0, [rsp]           ; u * total_weight
+    ; xmm0 = target
+
+    ; Walk cumulative weights to find index
+    xorpd xmm1, xmm1            ; cumsum = 0
+    xor ecx, ecx
+.ws_cum_loop:
+    cmp rcx, r13
+    jge .ws_last                ; shouldn't happen, but safety
+
+    addsd xmm1, [r12 + rcx*8]  ; cumsum += weight[i]
+    ucomisd xmm1, xmm0
+    ja .ws_found                ; cumsum > target → select this index
+
+    inc rcx
+    jmp .ws_cum_loop
+
+.ws_last:
+    ; Edge case: select last valid index
+    mov rcx, r13
+    dec rcx
+.ws_found:
+    mov dword [r15 + rbx*4], ecx  ; indices_out[out_idx] = selected
+    inc rbx
+    jmp .ws_sample_loop
+
+.ws_done:
+    xor eax, eax
+    add rsp, 24
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret

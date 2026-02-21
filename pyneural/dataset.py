@@ -242,6 +242,69 @@ class RandomSampler(Sampler):
         return self.num_samples
 
 
+class WeightedRandomSampler(Sampler):
+    """
+    Sample elements with class-balanced weighting (assembly-backed).
+
+    Computes inverse-frequency class weights via ``compute_class_weights``
+    in training_ops.asm, then draws ``num_samples`` indices using
+    ``weighted_sample_indices`` (cumulative-distribution sampling).
+
+    This oversamples minority classes and undersamples majority classes,
+    yielding a balanced training distribution even for imbalanced datasets.
+
+    Args:
+        labels: List or array of integer class labels for every sample.
+        num_classes: Total number of classes.
+        num_samples: How many indices to draw per epoch (default: len(labels)).
+        replacement: Must be True (weighted sampling always uses replacement).
+        seed: Optional RNG seed for reproducibility. 0 = time-based.
+
+    Example:
+        >>> sampler = WeightedRandomSampler(train_labels, num_classes=6)
+        >>> loader = DataLoader(dataset, sampler=sampler, batch_size=32)
+    """
+
+    def __init__(
+        self,
+        labels: List[int],
+        num_classes: int,
+        num_samples: Optional[int] = None,
+        replacement: bool = True,
+        seed: int = 0,
+    ):
+        self._labels = labels
+        self.num_classes = num_classes
+        self._num_samples = num_samples if num_samples is not None else len(labels)
+        self.seed = seed
+
+        # Pre-compute class weights and per-sample weights (assembly)
+        n = len(labels)
+        label_arr = (ctypes.c_int32 * n)(*labels)
+        class_w = (ctypes.c_double * num_classes)()
+        _lib.neural_compute_class_weights(label_arr, n, num_classes, class_w)
+
+        self._sample_weights = (ctypes.c_double * n)()
+        _lib.neural_compute_sample_weights(
+            label_arr, n, class_w, num_classes, self._sample_weights
+        )
+
+    @property
+    def num_samples(self) -> int:
+        return self._num_samples
+
+    def __iter__(self) -> Iterator[int]:
+        n_in = len(self._labels)
+        out = (ctypes.c_int32 * self._num_samples)()
+        _lib.neural_weighted_sample_indices(
+            self._sample_weights, n_in, self._num_samples, out, self.seed
+        )
+        return iter(out[i] for i in range(self._num_samples))
+
+    def __len__(self) -> int:
+        return self._num_samples
+
+
 class BatchSampler(Sampler):
     """Wraps another sampler to yield batches of indices."""
     
