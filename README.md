@@ -100,6 +100,9 @@ This project implements a complete neural network training framework in pure x86
 # Build the framework
 make
 
+# Build shared library
+make lib
+
 # Build with debug symbols
 make debug
 
@@ -125,6 +128,31 @@ make clean
 
 ```bash
 ./neural_framework test
+```
+
+## Validation Suite (Recommended)
+
+Run the staged validation suite to check build, dataset generation, assembly tests,
+Python integration tests, training viability across multiple configs, and API
+compatibility checks.
+
+```bash
+# Optional but recommended: isolated Python env for numpy-based checks
+python3 -m venv .neuasm
+./.neuasm/bin/pip install numpy
+
+# Smoke validation (fast)
+make validate-smoke
+
+# Regression validation (comprehensive)
+make validate
+```
+
+The validation runner is implemented in `tools/run_validation_suite.py` and supports:
+
+```bash
+python3 tools/run_validation_suite.py --tier smoke
+python3 tools/run_validation_suite.py --tier regression
 ```
 
 ## Configuration File Format

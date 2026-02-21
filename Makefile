@@ -121,10 +121,10 @@ verify-full: $(TARGET)
 
 # Run staged validation suite (build + datasets + tests + compatibility checks)
 validate-smoke: $(TARGET) $(SHARED_LIB)
-       python3 tools/run_validation_suite.py --tier smoke
+	python3 tools/run_validation_suite.py --tier smoke
 
 validate: $(TARGET) $(SHARED_LIB)
-       python3 tools/run_validation_suite.py --tier regression
+	python3 tools/run_validation_suite.py --tier regression
 
 # Show help
 help:
@@ -139,8 +139,8 @@ help:
 	@echo "  run-test   - Build and run unit tests"
 	@echo "  verify     - Build and run mathematical verification"
 	@echo "  verify-full - Build and run full verification (requires numpy)"
-       @echo "  validate-smoke - Run smoke validation suite"
-       @echo "  validate   - Run regression validation suite"
+	@echo "  validate-smoke - Run smoke validation suite"
+	@echo "  validate   - Run regression validation suite"
 	@echo "  help       - Show this help message"
 	@echo ""
 	@echo "Usage after building:"

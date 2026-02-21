@@ -70,15 +70,21 @@ def run_compatibility_checks(results: List[CheckResult]) -> None:
         "neural_shutdown",
         "neural_version",
         "neural_get_simd_level",
+        "neural_get_simd_name",
         "neural_tensor_create",
         "neural_tensor_free",
+        "neural_tensor_data",
         "neural_linear_create",
-        "neural_relu_create",
-        "neural_sequential_create",
+        "neural_linear_forward",
+        "neural_relu",
+        "neural_sigmoid",
+        "neural_softmax",
         "neural_optimizer_free",
         "neural_sgd_create",
         "neural_adam_create",
         "neural_adamw_create",
+        "neural_dataset_load_csv",
+        "neural_dataset_get_batch",
     }
 
     nm = run_cmd(
@@ -197,7 +203,7 @@ def build_test_plan(tier: str) -> List[Tuple[str, str, bool]]:
                     f"{py} tools/test_gradient_clipping_integration.py",
                     False,
                 ),
-                ("py:adamw_simple", f"{py} test_adamw_simple.py", True),
+                ("py:adamw_simple", f"{py} test_adamw_simple.py", False),
                 ("py:adamw_minimal", f"{py} test_adamw_minimal.py", True),
                 ("py:convergence", f"{py} test_convergence.py", True),
                 (

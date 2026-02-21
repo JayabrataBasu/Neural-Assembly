@@ -101,8 +101,10 @@ def test_gradient_clipping_integration():
 
         # Test 3: Function existence verification
         print("\n--- Test 3: Function Address Verification ---")
-        print(f"neural_clip_grad_norm address: {hex(lib.neural_clip_grad_norm._objects[0])}")
-        print(f"neural_clip_grad_value address: {hex(lib.neural_clip_grad_value._objects[0])}")
+        norm_addr = ctypes.cast(lib.neural_clip_grad_norm, ctypes.c_void_p).value
+        value_addr = ctypes.cast(lib.neural_clip_grad_value, ctypes.c_void_p).value
+        print(f"neural_clip_grad_norm address: {hex(norm_addr) if norm_addr else 'NULL'}")
+        print(f"neural_clip_grad_value address: {hex(value_addr) if value_addr else 'NULL'}")
 
         print("\n✅ Gradient clipping integration test PASSED!")
         print("Functions are properly exported and handle edge cases correctly.")

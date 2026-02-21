@@ -11,12 +11,17 @@ lib_path = os.path.join(os.path.dirname(__file__), 'libneural.so')
 lib = ctypes.CDLL(lib_path)
 
 # Function signatures
+lib.neural_init.argtypes = []
+lib.neural_init.restype = ctypes.c_int
 lib.neural_adamw_create.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double]
 lib.neural_adamw_create.restype = ctypes.c_void_p
 
 def test_adamw_creation():
     """Test that AdamW optimizer can be created"""
     print("Testing AdamW optimizer creation...")
+
+    # Initialize framework runtime first
+    lib.neural_init()
     
     lr = 0.01
     beta1 = 0.9
