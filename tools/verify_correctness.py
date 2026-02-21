@@ -10,10 +10,12 @@ import os
 import tempfile
 import struct
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 def run_framework_command(cmd):
     """Run a command in the framework and capture output"""
     try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd="/home/jayabrata/Neural Assembly")
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=PROJECT_ROOT)
         return result.returncode, result.stdout, result.stderr
     except Exception as e:
         return -1, "", str(e)

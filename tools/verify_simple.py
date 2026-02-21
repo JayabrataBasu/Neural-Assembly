@@ -4,6 +4,8 @@ Simple verification script for Neural Assembly framework.
 Manual calculation verification without external dependencies.
 """
 
+import os
+
 def test_linear_math():
     """Manually verify linear layer calculations"""
     print("Testing Linear Layer Math...")
@@ -150,8 +152,9 @@ def run_framework_test():
 
     try:
         import subprocess
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         result = subprocess.run(["./neural_framework", "test"],
-                              capture_output=True, text=True, cwd="/home/jayabrata/Neural Assembly")
+                              capture_output=True, text=True, cwd=project_root)
 
         if result.returncode == 0:
             print("✓ Framework tests passed")

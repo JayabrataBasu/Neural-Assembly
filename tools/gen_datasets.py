@@ -11,8 +11,21 @@ import os
 os.makedirs('csv', exist_ok=True)
 
 def generate_xor_data():
-    """Generate XOR dataset (already created, but included for completeness)"""
-    print("XOR data already exists in csv/xor_train.csv and csv/xor_labels.csv")
+    """Generate XOR dataset."""
+    print("Generating XOR data")
+
+    X = np.array([
+        [0.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 0.0],
+        [1.0, 1.0],
+    ], dtype=np.float32)
+    y = np.array([[0.0], [1.0], [1.0], [0.0]], dtype=np.float32)
+
+    np.savetxt('csv/xor_train.csv', X, delimiter=',', fmt='%.1f')
+    np.savetxt('csv/xor_labels.csv', y, delimiter=',', fmt='%.1f')
+
+    print("  Created: csv/xor_train.csv, csv/xor_labels.csv")
 
 def generate_sine_data(n_train=1000, n_val=200):
     """Generate sine wave regression data"""

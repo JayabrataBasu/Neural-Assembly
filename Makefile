@@ -62,7 +62,7 @@ LIB_OBJS = $(LIB_SRCS:.asm=.o)
 PIC_OBJS = $(LIB_SRCS:.asm=.pic.o)
 
 # Phony targets
-.PHONY: all clean debug help run-test lib shared install
+.PHONY: all clean debug help run-test lib shared install validate validate-smoke
 
 # Default target
 all: $(TARGET)
@@ -119,6 +119,13 @@ verify: $(TARGET)
 verify-full: $(TARGET)
 	python3 tools/verify_correctness.py
 
+# Run staged validation suite (build + datasets + tests + compatibility checks)
+validate-smoke: $(TARGET) $(SHARED_LIB)
+       python3 tools/run_validation_suite.py --tier smoke
+
+validate: $(TARGET) $(SHARED_LIB)
+       python3 tools/run_validation_suite.py --tier regression
+
 # Show help
 help:
 	@echo "Neural Assembly Framework Build System"
@@ -132,6 +139,8 @@ help:
 	@echo "  run-test   - Build and run unit tests"
 	@echo "  verify     - Build and run mathematical verification"
 	@echo "  verify-full - Build and run full verification (requires numpy)"
+       @echo "  validate-smoke - Run smoke validation suite"
+       @echo "  validate   - Run regression validation suite"
 	@echo "  help       - Show this help message"
 	@echo ""
 	@echo "Usage after building:"
