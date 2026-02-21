@@ -14,6 +14,12 @@ LD = ld
 TARGET = neural_framework
 SHARED_LIB = libneural.so
 
+# Python executable (prefer project virtualenv when present)
+PYTHON ?= python3
+ifneq ("$(wildcard .neuasm/bin/python)","")
+PYTHON := ./.neuasm/bin/python
+endif
+
 # Source files (order matters for dependencies)
 SRCS = mem.asm \
        utils.asm \
@@ -113,18 +119,18 @@ run-test: $(TARGET)
 
 # Run mathematical verification
 verify: $(TARGET)
-	python3 tools/verify_simple.py
+	$(PYTHON) tools/verify_simple.py
 
 # Run full verification (requires numpy)
 verify-full: $(TARGET)
-	python3 tools/verify_correctness.py
+	$(PYTHON) tools/verify_correctness.py
 
 # Run staged validation suite (build + datasets + tests + compatibility checks)
 validate-smoke: $(TARGET) $(SHARED_LIB)
-	python3 tools/run_validation_suite.py --tier smoke
+	$(PYTHON) tools/run_validation_suite.py --tier smoke
 
 validate: $(TARGET) $(SHARED_LIB)
-	python3 tools/run_validation_suite.py --tier regression
+	$(PYTHON) tools/run_validation_suite.py --tier regression
 
 # Show help
 help:

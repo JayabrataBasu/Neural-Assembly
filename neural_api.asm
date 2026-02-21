@@ -126,6 +126,9 @@ extern clip_grad_value_
 extern node_create
 extern node_free
 extern backward
+extern node_relu
+extern node_sigmoid
+extern node_softmax
 
 extern dataset_load_csv
 extern dataset_free
@@ -841,15 +844,54 @@ neural_buffer_info:
 neural_tensor_copy:
     push rbp
     mov rbp, rsp
+    push rbx
+    push r12
+    push r13
     
     test rdi, rdi
     jz .null
     test rsi, rsi
     jz .null
-    
-    call tensor_copy
+
+    mov r12, rdi                    ; dst
+    mov r13, rsi                    ; src
+
+    ; Validate dtype compatibility
+    mov eax, [r12 + TENSOR_DTYPE]
+    cmp eax, [r13 + TENSOR_DTYPE]
+    jne .dtype_mismatch
+
+    ; Validate element count compatibility
+    mov rdi, r12
+    call tensor_numel
+    mov rbx, rax
+
+    mov rdi, r13
+    call tensor_numel
+    cmp rax, rbx
+    jne .shape_mismatch
+
+    ; Copy data bytes from src into dst
+    mov rdi, r12
+    call tensor_data_size
+    mov rdx, rax
+
+    mov rdi, [r12 + TENSOR_DATA]
+    mov rsi, [r13 + TENSOR_DATA]
+    call mem_copy
     
     xor eax, eax
+    mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.shape_mismatch:
+    mov eax, NEURAL_ERR_SHAPE_MISMATCH
+    mov [rel last_error], eax
+    jmp .done
+
+.dtype_mismatch:
+    mov eax, NEURAL_ERR_DTYPE_MISMATCH
+    mov [rel last_error], eax
     jmp .done
 
 .null:
@@ -857,6 +899,9 @@ neural_tensor_copy:
     mov [rel last_error], eax
 
 .done:
+    pop r13
+    pop r12
+    pop rbx
     pop rbp
     ret
 
@@ -1112,16 +1157,49 @@ neural_matmul:
 neural_relu:
     push rbp
     mov rbp, rsp
+    push r12
+    push r13
     
     test rdi, rdi
     jz .null
     test rsi, rsi
     jz .null
-    
-    call relu_forward
+
+    ; Save output tensor pointer
+    mov r12, rdi
+
+    ; Create input node from input tensor
+    mov rdi, rsi
+    xor esi, esi
+    call node_create
+    test rax, rax
+    jz .internal
+    mov r13, rax
+
+    ; Compute ReLU node
+    mov rdi, r13
+    call node_relu
+    test rax, rax
+    jz .internal
+
+    ; Copy output node tensor into caller-provided output tensor
+    mov rsi, [rax]
+    mov rdi, r12
+    call neural_tensor_copy
+    test eax, eax
+    jnz .tensor_error
     
     xor eax, eax
     mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.tensor_error:
+    mov [rel last_error], eax
+    jmp .done
+
+.internal:
+    mov eax, NEURAL_ERR_INTERNAL
+    mov [rel last_error], eax
     jmp .done
 
 .null:
@@ -1129,6 +1207,8 @@ neural_relu:
     mov [rel last_error], eax
 
 .done:
+    pop r13
+    pop r12
     pop rbp
     ret
 
@@ -1138,16 +1218,49 @@ neural_relu:
 neural_sigmoid:
     push rbp
     mov rbp, rsp
+    push r12
+    push r13
     
     test rdi, rdi
     jz .null
     test rsi, rsi
     jz .null
-    
-    call sigmoid_forward
+
+    ; Save output tensor pointer
+    mov r12, rdi
+
+    ; Create input node from input tensor
+    mov rdi, rsi
+    xor esi, esi
+    call node_create
+    test rax, rax
+    jz .internal
+    mov r13, rax
+
+    ; Compute sigmoid node
+    mov rdi, r13
+    call node_sigmoid
+    test rax, rax
+    jz .internal
+
+    ; Copy output node tensor into caller-provided output tensor
+    mov rsi, [rax]
+    mov rdi, r12
+    call neural_tensor_copy
+    test eax, eax
+    jnz .tensor_error
     
     xor eax, eax
     mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.tensor_error:
+    mov [rel last_error], eax
+    jmp .done
+
+.internal:
+    mov eax, NEURAL_ERR_INTERNAL
+    mov [rel last_error], eax
     jmp .done
 
 .null:
@@ -1155,6 +1268,8 @@ neural_sigmoid:
     mov [rel last_error], eax
 
 .done:
+    pop r13
+    pop r12
     pop rbp
     ret
 
@@ -1164,16 +1279,49 @@ neural_sigmoid:
 neural_softmax:
     push rbp
     mov rbp, rsp
+    push r12
+    push r13
     
     test rdi, rdi
     jz .null
     test rsi, rsi
     jz .null
-    
-    call softmax_forward
+
+    ; Save output tensor pointer
+    mov r12, rdi
+
+    ; Create input node from input tensor
+    mov rdi, rsi
+    xor esi, esi
+    call node_create
+    test rax, rax
+    jz .internal
+    mov r13, rax
+
+    ; Compute softmax node
+    mov rdi, r13
+    call node_softmax
+    test rax, rax
+    jz .internal
+
+    ; Copy output node tensor into caller-provided output tensor
+    mov rsi, [rax]
+    mov rdi, r12
+    call neural_tensor_copy
+    test eax, eax
+    jnz .tensor_error
     
     xor eax, eax
     mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.tensor_error:
+    mov [rel last_error], eax
+    jmp .done
+
+.internal:
+    mov eax, NEURAL_ERR_INTERNAL
+    mov [rel last_error], eax
     jmp .done
 
 .null:
@@ -1181,6 +1329,8 @@ neural_softmax:
     mov [rel last_error], eax
 
 .done:
+    pop r13
+    pop r12
     pop rbp
     ret
 
@@ -1561,6 +1711,8 @@ neural_linear_free:
 neural_linear_forward:
     push rbp
     mov rbp, rsp
+    push r12
+    push r13
     
     test rdi, rdi
     jz .null
@@ -1568,11 +1720,43 @@ neural_linear_forward:
     jz .null
     test rdx, rdx
     jz .null
-    
+
+    ; Save pointers
+    mov r13, rdi                   ; layer/module pointer
+    mov r12, rdx
+
+    ; Create input node from input tensor
+    mov rdi, rsi
+    xor esi, esi
+    call node_create
+    test rax, rax
+    jz .internal
+
+    ; linear_forward expects (Module*, Node*) and returns Node*
+    mov rdi, r13
+    mov rsi, rax
     call linear_forward
+    test rax, rax
+    jz .internal
+
+    ; Copy output node tensor into caller-provided output tensor
+    mov rsi, [rax]
+    mov rdi, r12
+    call neural_tensor_copy
+    test eax, eax
+    jnz .tensor_error
     
     xor eax, eax
     mov dword [rel last_error], NEURAL_OK
+    jmp .done
+
+.tensor_error:
+    mov [rel last_error], eax
+    jmp .done
+
+.internal:
+    mov eax, NEURAL_ERR_INTERNAL
+    mov [rel last_error], eax
     jmp .done
 
 .null:
@@ -1580,6 +1764,8 @@ neural_linear_forward:
     mov [rel last_error], eax
 
 .done:
+    pop r13
+    pop r12
     pop rbp
     ret
 
@@ -2143,6 +2329,27 @@ neural_linear_weight:
     test rax, rax
     jz .null
     mov rax, [rax]                 ; params[0] = weight
+    jmp .done
+
+.null:
+    xor eax, eax
+
+.done:
+    pop rbp
+    ret
+
+neural_linear_bias:
+    push rbp
+    mov rbp, rsp
+
+    test rdi, rdi
+    jz .null
+
+    ; Get bias tensor from params[1]
+    mov rax, [rdi + MODULE_PARAMS]
+    test rax, rax
+    jz .null
+    mov rax, [rax + 8]             ; params[1] = bias
     jmp .done
 
 .null:

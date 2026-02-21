@@ -210,7 +210,7 @@ xavier_init:
     cvtsi2sd xmm1, rax
     divsd xmm1, xmm0                ; 2.0 / fan_in
     sqrtsd xmm1, xmm1               ; sqrt
-    movsd [rel rsp], xmm1               ; save scale
+    movsd [rsp], xmm1               ; save scale
     
     mov rbx, [r12 + TENSOR_DATA]
     mov eax, [r12 + TENSOR_DTYPE]
@@ -314,13 +314,13 @@ linear_create:
     mov rbx, rax
     
     ; Create weight tensor (out_features x in_features)
-    mov [rel rsp], r13                  ; shape[0] = out_features
+    mov [rsp], r13                  ; shape[0] = out_features
     mov [rsp+8], r12                ; shape[1] = in_features
     mov rdi, 2
-    lea rsi, [rel rsp]
+    lea rsi, [rsp]
     mov edx, r14d
     call tensor_create
-    mov [rel rbx], rax                  ; params[0] = weight
+    mov [rbx], rax                  ; params[0] = weight
     mov [rsp+16], rax
     
     ; Initialize weight with Xavier
@@ -330,9 +330,9 @@ linear_create:
     call xavier_init
     
     ; Create bias tensor (out_features)
-    mov [rel rsp], r13                  ; shape[0] = out_features
+    mov [rsp], r13                  ; shape[0] = out_features
     mov rdi, 1
-    lea rsi, [rel rsp]
+    lea rsi, [rsp]
     mov edx, r14d
     call tensor_create
     mov [rbx + 8], rax              ; params[1] = bias
@@ -345,11 +345,11 @@ linear_create:
     mov [rsp+24], rax
     
     ; Create nodes for parameters (with PERSISTENT flag to prevent accidental freeing)
-    mov rdi, [rel rbx]                  ; weight tensor
+    mov rdi, [rbx]                  ; weight tensor
     mov rsi, (NODE_FLAG_REQUIRES_GRAD | NODE_FLAG_PERSISTENT)  ; requires_grad + persistent
     call node_create
     mov rcx, [rsp+24]
-    mov [rel rcx], rax                  ; param_nodes[0]
+    mov [rcx], rax                  ; param_nodes[0]
     
     mov rdi, [rbx + 8]              ; bias tensor
     mov rsi, (NODE_FLAG_REQUIRES_GRAD | NODE_FLAG_PERSISTENT)  ; requires_grad + persistent
@@ -411,15 +411,15 @@ linear_forward_fn:
     
     ; Get weight and bias nodes
     mov rax, [r12 + MODULE_PARAM_NODES]
-    mov rcx, [rel rax]                  ; weight_node
-    mov [rel rsp], rcx
+    mov rcx, [rax]                  ; weight_node
+    mov [rsp], rcx
     mov rcx, [rax + 8]              ; bias_node
     mov [rsp+8], rcx
     
     ; Forward: y = x @ W^T + b
     ; First create W^T
     mov rax, [r12 + MODULE_PARAMS]
-    mov rdi, [rel rax]                  ; weight tensor (out x in)
+    mov rdi, [rax]                  ; weight tensor (out x in)
     mov [rsp+16], rdi
     
     ; Create transposed weight tensor (in x out)
@@ -454,7 +454,7 @@ linear_forward_fn:
     ; Get batch size from input
     mov rax, [r13 + NODE_VALUE]
     mov rax, [rax + TENSOR_SHAPE]
-    mov rcx, [rel rax]                  ; batch_size
+    mov rcx, [rax]                  ; batch_size
     mov [rsp+64], rcx
     
     ; Create output tensor for bias addition
@@ -554,8 +554,8 @@ linear_forward_fn:
     call mem_alloc
     pop rcx
     mov [rcx + NODE_PARENTS], rax
-    mov [rel rax], r13                  ; parent[0] = input
-    mov rdx, [rel rsp]
+    mov [rax], r13                  ; parent[0] = input
+    mov rdx, [rsp]
     mov [rax + 8], rdx              ; parent[1] = weight
     mov rdx, [rsp+8]
     mov [rax + 16], rdx             ; parent[2] = bias
@@ -564,7 +564,7 @@ linear_forward_fn:
     mov [rcx + NODE_SAVED_TENSORS], r12
     
     ; Store output
-    mov [rel r14], rcx
+    mov [r14], rcx
     
     ; Cleanup temporary W^T tensor (but not the node, it's in the graph)
     ; Actually, we should keep it for backward...
@@ -622,8 +622,8 @@ linear_backward:
     mov r14, [r12 + NODE_PARENTS]   ; parents array
     
     ; Get parents
-    mov rax, [rel r14]                  ; input node
-    mov [rel rsp], rax
+    mov rax, [r14]                  ; input node
+    mov [rsp], rax
     mov rax, [r14 + 8]              ; weight node
     mov [rsp+8], rax
     mov rax, [r14 + 16]             ; bias node
@@ -631,13 +631,13 @@ linear_backward:
     
     ; Get dimensions from dL/dout
     mov rax, [r13 + TENSOR_SHAPE]
-    mov rcx, [rel rax]                  ; batch_size
+    mov rcx, [rax]                  ; batch_size
     mov [rsp+24], rcx
     mov rcx, [rax + 8]              ; out_features
     mov [rsp+32], rcx
     
     ; Get input shape
-    mov rax, [rel rsp]
+    mov rax, [rsp]
     mov rax, [rax + NODE_VALUE]
     mov rax, [rax + TENSOR_SHAPE]
     mov rcx, [rax + 8]              ; in_features
@@ -759,7 +759,7 @@ linear_backward:
     ; matmul: temp = dL/dout^T @ x
     mov rdi, rax
     mov rsi, [rsp+72]               ; dL/dout^T
-    mov rax, [rel rsp]                  ; input node
+    mov rax, [rsp]                  ; input node
     mov rdx, [rax + NODE_VALUE]     ; x tensor
     call matmul
     
@@ -777,7 +777,7 @@ linear_backward:
 
 .skip_weight_grad:
     ; 3. dL/dx = dL/dout @ W
-    mov rax, [rel rsp]                  ; input node
+    mov rax, [rsp]                  ; input node
     mov rdi, [rax + NODE_GRAD]
     test rdi, rdi
     jz .done
@@ -1231,7 +1231,7 @@ conv2d_create:
     sub rsp, 72
     
     ; Save parameters
-    mov [rel rsp], rdi                  ; in_channels
+    mov [rsp], rdi                  ; in_channels
     mov [rsp+8], rsi                ; out_channels
     mov [rsp+16], rdx               ; kernel_h
     mov [rsp+24], rcx               ; kernel_w
@@ -1257,8 +1257,8 @@ conv2d_create:
     mov rbx, rax
     
     ; Copy config
-    mov rax, [rel rsp]
-    mov [rel rbx], rax                  ; in_channels
+    mov rax, [rsp]
+    mov [rbx], rax                  ; in_channels
     mov rax, [rsp+8]
     mov [rbx+8], rax                ; out_channels
     mov rax, [rsp+16]
@@ -1279,10 +1279,10 @@ conv2d_create:
     ; Create weight tensor (out_channels x in_channels x kernel_h x kernel_w)
     mov rax, [rsp+8]                ; out_channels
     mov [rsp+52], rax
-    mov rax, [rel rsp]                  ; in_channels
+    mov rax, [rsp]                  ; in_channels
     mov [rsp+60], rax
     ; Note: For simplicity, treating as 2D (out x in*kh*kw)
-    mov rax, [rel rsp]
+    mov rax, [rsp]
     imul rax, [rsp+16]
     imul rax, [rsp+24]              ; in * kh * kw
     mov [rsp+60], rax
@@ -1291,7 +1291,7 @@ conv2d_create:
     lea rsi, [rsp+52]
     mov edx, [rsp+48]
     call tensor_create
-    mov [rel r12], rax
+    mov [r12], rax
     
     ; Initialize weight
     mov rdi, rax
@@ -1314,10 +1314,10 @@ conv2d_create:
     mov [r15 + MODULE_PARAM_NODES], rax
     mov r13, rax
     
-    mov rdi, [rel r12]
+    mov rdi, [r12]
     mov rsi, 1
     call node_create
-    mov [rel r13], rax
+    mov [r13], rax
     
     mov rdi, [r12+8]
     mov rsi, 1
@@ -1364,7 +1364,7 @@ conv2d_forward_fn:
     mov rbp, rsp
     
     mov rax, rsi
-    mov [rel rdx], rax
+    mov [rdx], rax
     
     pop rbp
     ret
@@ -1489,17 +1489,17 @@ module_get_params:
     jz .null_module
     
     mov eax, [rdi + MODULE_N_PARAMS]
-    mov [rel rdx], eax
+    mov [rdx], eax
     
     mov rax, [rdi + MODULE_PARAMS]
-    mov [rel rsi], rax
+    mov [rsi], rax
     
     pop rbp
     ret
 
 .null_module:
-    mov dword [rel rdx], 0
-    mov qword [rel rsi], 0
+    mov dword [rdx], 0
+    mov qword [rsi], 0
     pop rbp
     ret
 
