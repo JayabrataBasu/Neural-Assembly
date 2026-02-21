@@ -198,6 +198,13 @@ _lib.neural_linear_free.argtypes = [ctypes.c_void_p]
 _lib.neural_linear_forward.restype = ctypes.c_int
 _lib.neural_linear_forward.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
 
+# Linear layer weight/bias accessors
+_lib.neural_linear_weight.restype = ctypes.c_void_p
+_lib.neural_linear_weight.argtypes = [ctypes.c_void_p]
+
+_lib.neural_linear_bias.restype = ctypes.c_void_p
+_lib.neural_linear_bias.argtypes = [ctypes.c_void_p]
+
 # Optimizers
 _lib.neural_sgd_create.restype = ctypes.c_void_p
 _lib.neural_sgd_create.argtypes = [ctypes.c_double, ctypes.c_double]

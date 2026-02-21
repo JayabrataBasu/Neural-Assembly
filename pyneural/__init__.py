@@ -27,7 +27,7 @@ Example Usage:
 """
 
 from .tensor import Tensor
-from .nn import Linear, ReLU, Sigmoid, Softmax, Sequential
+from .nn import Linear, ReLU, Sigmoid, Softmax, Sequential, MSELoss, CrossEntropyLoss
 from .optim import SGD, Adam
 from .autograd import (
     no_grad,
@@ -60,7 +60,19 @@ from .dataset import (
 )
 from .config import Config
 
-__version__ = "1.0.0"
+# New modules
+from .metrics import ConfusionMatrix, compute_accuracy, top_k_accuracy
+from .schedulers import (
+    StepLR,
+    ExponentialLR,
+    CosineAnnealingLR,
+    WarmupLR,
+    ReduceLROnPlateau,
+)
+from .training import Trainer, TrainerConfig, TrainingHistory, EarlyStopping, NaNDetector
+from . import init as weight_init
+
+__version__ = "1.1.0"
 __all__ = [
     # Core
     "init",
@@ -79,6 +91,9 @@ __all__ = [
     "Sigmoid",
     "Softmax",
     "Sequential",
+    # Loss Functions
+    "MSELoss",
+    "CrossEntropyLoss",
     # Optimizers
     "SGD",
     "Adam",
@@ -100,4 +115,22 @@ __all__ = [
     "RandomSampler",
     "BatchSampler",
     "Config",
+    # Metrics
+    "ConfusionMatrix",
+    "compute_accuracy",
+    "top_k_accuracy",
+    # Schedulers
+    "StepLR",
+    "ExponentialLR",
+    "CosineAnnealingLR",
+    "WarmupLR",
+    "ReduceLROnPlateau",
+    # Training
+    "Trainer",
+    "TrainerConfig",
+    "TrainingHistory",
+    "EarlyStopping",
+    "NaNDetector",
+    # Weight Initialization
+    "weight_init",
 ]
