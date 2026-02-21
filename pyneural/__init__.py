@@ -70,7 +70,12 @@ from .schedulers import (
     ReduceLROnPlateau,
 )
 from .training import Trainer, TrainerConfig, TrainingHistory, EarlyStopping, NaNDetector
-from . import init as weight_init
+
+import importlib as _importlib
+weight_init = _importlib.import_module('.init', __name__)
+
+# Re-import core.init to ensure pn.init() is the framework initializer
+from .core import init
 
 __version__ = "1.1.0"
 __all__ = [
