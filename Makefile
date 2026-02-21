@@ -36,6 +36,7 @@ SRCS = mem.asm \
        model_io.asm \
        config_parser.asm \
        threads.asm \
+       training_ops.asm \
        tests.asm \
        verify.asm \
        compat.asm \
@@ -57,6 +58,7 @@ LIB_SRCS = mem.asm \
            model_io.asm \
            config_parser.asm \
            threads.asm \
+           training_ops.asm \
            tests.asm \
            verify.asm \
            compat.asm \

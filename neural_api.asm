@@ -123,6 +123,32 @@ extern optimizer_free
 extern clip_grad_norm_
 extern clip_grad_value_
 
+; Training ops (training_ops.asm)
+extern confusion_matrix_update
+extern compute_class_precision
+extern compute_class_recall
+extern compute_class_f1
+extern compute_accuracy_from_matrix
+extern lr_step_decay
+extern lr_exponential_decay
+extern lr_cosine_annealing
+extern tensor_has_nan
+extern tensor_has_inf
+extern tensor_grad_l2_norm
+extern dropout_forward
+extern dropout_backward
+extern init_uniform_range
+extern init_normal_range
+extern init_he_uniform
+extern init_xavier_uniform
+extern init_he_normal
+extern init_xavier_normal
+extern init_kaiming_uniform
+
+; Optimizer LR access (optimizers.asm)
+extern optimizer_set_lr
+extern optimizer_get_lr
+
 extern node_create
 extern node_free
 extern backward
@@ -228,6 +254,30 @@ global neural_config_get_float
 global neural_config_get_string
 global neural_get_simd_level
 global neural_get_simd_name
+
+; Training ops API
+global neural_confusion_matrix_update
+global neural_compute_class_precision
+global neural_compute_class_recall
+global neural_compute_class_f1
+global neural_compute_accuracy_from_matrix
+global neural_lr_step_decay
+global neural_lr_exponential_decay
+global neural_lr_cosine_annealing
+global neural_tensor_has_nan
+global neural_tensor_has_inf
+global neural_tensor_grad_l2_norm
+global neural_dropout_forward
+global neural_dropout_backward
+global neural_init_uniform_range
+global neural_init_normal_range
+global neural_init_he_uniform
+global neural_init_xavier_uniform
+global neural_init_he_normal
+global neural_init_xavier_normal
+global neural_init_kaiming_uniform
+global neural_optimizer_set_lr
+global neural_optimizer_get_lr
 
 ; =============================================================================
 ; neural_init - Initialize the framework
@@ -2577,3 +2627,96 @@ neural_config_get_string:
 .done:
     pop rbp
     ret
+
+; =============================================================================
+; Training Operations API Wrappers
+; =============================================================================
+
+; neural_confusion_matrix_update(matrix, targets, predictions, n, num_classes)
+; Direct pass-through — same ABI
+neural_confusion_matrix_update:
+    jmp confusion_matrix_update
+
+; neural_compute_class_precision(matrix, class_idx, num_classes) -> xmm0=double
+neural_compute_class_precision:
+    jmp compute_class_precision
+
+; neural_compute_class_recall(matrix, class_idx, num_classes) -> xmm0=double
+neural_compute_class_recall:
+    jmp compute_class_recall
+
+; neural_compute_class_f1(matrix, class_idx, num_classes) -> xmm0=double
+neural_compute_class_f1:
+    jmp compute_class_f1
+
+; neural_compute_accuracy_from_matrix(matrix, num_classes) -> xmm0=double
+neural_compute_accuracy_from_matrix:
+    jmp compute_accuracy_from_matrix
+
+; neural_lr_step_decay(xmm0=initial_lr, edi=epoch, esi=step_size, xmm1=gamma)
+neural_lr_step_decay:
+    jmp lr_step_decay
+
+; neural_lr_exponential_decay(xmm0=initial_lr, edi=epoch, xmm1=gamma)
+neural_lr_exponential_decay:
+    jmp lr_exponential_decay
+
+; neural_lr_cosine_annealing(xmm0=initial_lr, edi=epoch, esi=T_max, xmm1=eta_min)
+neural_lr_cosine_annealing:
+    jmp lr_cosine_annealing
+
+; neural_tensor_has_nan(data_ptr, num_elements) -> eax
+neural_tensor_has_nan:
+    jmp tensor_has_nan
+
+; neural_tensor_has_inf(data_ptr, num_elements) -> eax
+neural_tensor_has_inf:
+    jmp tensor_has_inf
+
+; neural_tensor_grad_l2_norm(data_ptr, num_elements) -> xmm0=float
+neural_tensor_grad_l2_norm:
+    jmp tensor_grad_l2_norm
+
+; neural_dropout_forward(input, output, mask, n, xmm0=p)
+neural_dropout_forward:
+    jmp dropout_forward
+
+; neural_dropout_backward(grad_out, grad_in, mask, n, xmm0=p)
+neural_dropout_backward:
+    jmp dropout_backward
+
+; neural_init_uniform_range(data, n, xmm0=lo, xmm1=hi, edx=seed)
+neural_init_uniform_range:
+    jmp init_uniform_range
+
+; neural_init_normal_range(data, n, xmm0=mean, xmm1=std, edx=seed)
+neural_init_normal_range:
+    jmp init_normal_range
+
+; neural_init_he_uniform(data, n, fan, seed)
+neural_init_he_uniform:
+    jmp init_he_uniform
+
+; neural_init_xavier_uniform(data, n, fan_in, fan_out, seed)
+neural_init_xavier_uniform:
+    jmp init_xavier_uniform
+
+; neural_init_he_normal(data, n, fan, seed)
+neural_init_he_normal:
+    jmp init_he_normal
+
+; neural_init_xavier_normal(data, n, fan_in, fan_out, seed)
+neural_init_xavier_normal:
+    jmp init_xavier_normal
+
+; neural_init_kaiming_uniform(data, n, fan_in, fan_out, mode, seed)
+neural_init_kaiming_uniform:
+    jmp init_kaiming_uniform
+
+; neural_optimizer_set_lr(opt, xmm0=lr)
+neural_optimizer_set_lr:
+    jmp optimizer_set_lr
+
+; neural_optimizer_get_lr(opt) -> xmm0=lr
+neural_optimizer_get_lr:
+    jmp optimizer_get_lr

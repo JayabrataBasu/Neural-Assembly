@@ -266,6 +266,182 @@ _lib.neural_config_load.argtypes = [ctypes.c_char_p]
 _lib.neural_config_free.restype = None
 _lib.neural_config_free.argtypes = [ctypes.c_void_p]
 
+# --- Training Operations (training_ops.asm) ---
+
+# Confusion Matrix
+_lib.neural_confusion_matrix_update.restype = ctypes.c_int
+_lib.neural_confusion_matrix_update.argtypes = [
+    ctypes.c_void_p,   # int32_t* matrix
+    ctypes.c_void_p,   # int32_t* targets
+    ctypes.c_void_p,   # int32_t* predictions
+    ctypes.c_uint64,   # n
+    ctypes.c_uint64,   # num_classes
+]
+
+_lib.neural_compute_class_precision.restype = ctypes.c_double
+_lib.neural_compute_class_precision.argtypes = [
+    ctypes.c_void_p,   # int32_t* matrix
+    ctypes.c_int,      # class_idx
+    ctypes.c_int,      # num_classes
+]
+
+_lib.neural_compute_class_recall.restype = ctypes.c_double
+_lib.neural_compute_class_recall.argtypes = [
+    ctypes.c_void_p,   # int32_t* matrix
+    ctypes.c_int,      # class_idx
+    ctypes.c_int,      # num_classes
+]
+
+_lib.neural_compute_class_f1.restype = ctypes.c_double
+_lib.neural_compute_class_f1.argtypes = [
+    ctypes.c_void_p,   # int32_t* matrix
+    ctypes.c_int,      # class_idx
+    ctypes.c_int,      # num_classes
+]
+
+_lib.neural_compute_accuracy_from_matrix.restype = ctypes.c_double
+_lib.neural_compute_accuracy_from_matrix.argtypes = [
+    ctypes.c_void_p,   # int32_t* matrix
+    ctypes.c_int,      # num_classes
+]
+
+# LR Schedules
+_lib.neural_lr_step_decay.restype = ctypes.c_double
+_lib.neural_lr_step_decay.argtypes = [
+    ctypes.c_double,   # initial_lr (xmm0)
+    ctypes.c_int,      # epoch (edi)
+    ctypes.c_int,      # step_size (esi)
+    ctypes.c_double,   # gamma (xmm1)
+]
+
+_lib.neural_lr_exponential_decay.restype = ctypes.c_double
+_lib.neural_lr_exponential_decay.argtypes = [
+    ctypes.c_double,   # initial_lr (xmm0)
+    ctypes.c_int,      # epoch (edi)
+    ctypes.c_double,   # gamma (xmm1)
+]
+
+_lib.neural_lr_cosine_annealing.restype = ctypes.c_double
+_lib.neural_lr_cosine_annealing.argtypes = [
+    ctypes.c_double,   # initial_lr (xmm0)
+    ctypes.c_int,      # epoch (edi)
+    ctypes.c_int,      # T_max (esi)
+    ctypes.c_double,   # eta_min (xmm1)
+]
+
+# Tensor Inspection
+_lib.neural_tensor_has_nan.restype = ctypes.c_int
+_lib.neural_tensor_has_nan.argtypes = [
+    ctypes.c_void_p,   # float* data
+    ctypes.c_uint64,   # num_elements
+]
+
+_lib.neural_tensor_has_inf.restype = ctypes.c_int
+_lib.neural_tensor_has_inf.argtypes = [
+    ctypes.c_void_p,   # float* data
+    ctypes.c_uint64,   # num_elements
+]
+
+_lib.neural_tensor_grad_l2_norm.restype = ctypes.c_float
+_lib.neural_tensor_grad_l2_norm.argtypes = [
+    ctypes.c_void_p,   # float* data
+    ctypes.c_uint64,   # num_elements
+]
+
+# Dropout
+_lib.neural_dropout_forward.restype = ctypes.c_int
+_lib.neural_dropout_forward.argtypes = [
+    ctypes.c_void_p,   # float* input
+    ctypes.c_void_p,   # float* output
+    ctypes.c_void_p,   # uint8_t* mask
+    ctypes.c_uint64,   # num_elements
+    ctypes.c_float,    # p (dropout probability)
+]
+
+_lib.neural_dropout_backward.restype = ctypes.c_int
+_lib.neural_dropout_backward.argtypes = [
+    ctypes.c_void_p,   # float* grad_output
+    ctypes.c_void_p,   # float* grad_input
+    ctypes.c_void_p,   # uint8_t* mask
+    ctypes.c_uint64,   # num_elements
+    ctypes.c_float,    # p
+]
+
+# Weight Initialization
+_lib.neural_init_uniform_range.restype = ctypes.c_int
+_lib.neural_init_uniform_range.argtypes = [
+    ctypes.c_void_p,   # float* data
+    ctypes.c_uint64,   # num_elements
+    ctypes.c_float,    # lo (xmm0)
+    ctypes.c_float,    # hi (xmm1)
+    ctypes.c_int,      # seed (edx)
+]
+
+_lib.neural_init_normal_range.restype = ctypes.c_int
+_lib.neural_init_normal_range.argtypes = [
+    ctypes.c_void_p,   # float* data
+    ctypes.c_uint64,   # num_elements
+    ctypes.c_float,    # mean (xmm0)
+    ctypes.c_float,    # std (xmm1)
+    ctypes.c_int,      # seed (edx)
+]
+
+_lib.neural_init_he_uniform.restype = ctypes.c_int
+_lib.neural_init_he_uniform.argtypes = [
+    ctypes.c_void_p,   # float* data
+    ctypes.c_uint64,   # num_elements
+    ctypes.c_uint64,   # fan
+    ctypes.c_int,      # seed
+]
+
+_lib.neural_init_xavier_uniform.restype = ctypes.c_int
+_lib.neural_init_xavier_uniform.argtypes = [
+    ctypes.c_void_p,   # float* data
+    ctypes.c_uint64,   # num_elements
+    ctypes.c_uint64,   # fan_in
+    ctypes.c_uint64,   # fan_out
+    ctypes.c_int,      # seed (r8d)
+]
+
+_lib.neural_init_he_normal.restype = ctypes.c_int
+_lib.neural_init_he_normal.argtypes = [
+    ctypes.c_void_p,   # float* data
+    ctypes.c_uint64,   # num_elements
+    ctypes.c_uint64,   # fan
+    ctypes.c_int,      # seed
+]
+
+_lib.neural_init_xavier_normal.restype = ctypes.c_int
+_lib.neural_init_xavier_normal.argtypes = [
+    ctypes.c_void_p,   # float* data
+    ctypes.c_uint64,   # num_elements
+    ctypes.c_uint64,   # fan_in
+    ctypes.c_uint64,   # fan_out
+    ctypes.c_int,      # seed (r8d)
+]
+
+_lib.neural_init_kaiming_uniform.restype = ctypes.c_int
+_lib.neural_init_kaiming_uniform.argtypes = [
+    ctypes.c_void_p,   # float* data
+    ctypes.c_uint64,   # num_elements
+    ctypes.c_uint64,   # fan_in
+    ctypes.c_uint64,   # fan_out
+    ctypes.c_int,      # mode (0=fan_in, 1=fan_out)
+    ctypes.c_int,      # seed
+]
+
+# Optimizer LR access
+_lib.neural_optimizer_set_lr.restype = None
+_lib.neural_optimizer_set_lr.argtypes = [
+    ctypes.c_void_p,   # Optimizer* opt
+    ctypes.c_double,   # lr
+]
+
+_lib.neural_optimizer_get_lr.restype = ctypes.c_double
+_lib.neural_optimizer_get_lr.argtypes = [
+    ctypes.c_void_p,   # Optimizer* opt
+]
+
 
 def _check_error(result: int, operation: str = "operation"):
     """Check result code and raise exception if error."""

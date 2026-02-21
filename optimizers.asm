@@ -907,7 +907,7 @@ optimizer_set_lr:
     test rbx, rbx
     jz .done
     
-    movsd [rel rbx], xmm0          ; both SGD/Adam have lr at offset 0
+    movsd [rbx], xmm0              ; both SGD/Adam have lr at offset 0
 
 .done:
     pop rbx
@@ -932,7 +932,7 @@ optimizer_get_lr:
     mov rbx, [rdi + OPT_STATE]
     test rbx, rbx
     jz .out
-    movsd xmm0, [rel rbx]
+    movsd xmm0, [rbx]
 
 .out:
     pop rbx
