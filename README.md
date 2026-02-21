@@ -251,11 +251,45 @@ Example configurations are provided in the `configs/` directory:
 | `sine_config.ini` | Sine regression | 1→32→32→1 |
 | `binary_class_config.ini` | Spiral classification | 2→16→16→1 |
 | `deep_network_config.ini` | Deep network | 10→64→64→64→64→10 |
+| `wine_quality_config.ini` | UCI Wine Quality (real-world) | 11→64→32→6 |
 
-Generate datasets for these examples:
+Generate synthetic datasets:
 ```bash
 python3 tools/gen_datasets.py
 ```
+
+## Real-World Benchmark: UCI Wine Quality
+
+The framework includes a real-world benchmark using the [UCI Wine Quality](https://archive.ics.uci.edu/ml/datasets/wine+quality) dataset — 1,599 red wine samples with 11 physicochemical features predicting quality scores across 6 classes.
+
+### Setup & Training
+
+```bash
+# Download and prepare the dataset (requires internet)
+python3 tools/prepare_wine_quality.py
+
+# Train (11→64→32→6, Adam, cross-entropy, 80 epochs)
+./neural_framework train configs/wine_quality_config.ini /tmp/na_wine.bin
+```
+
+### Results
+
+| Metric | Value |
+|--------|-------|
+| Parameters | 3,046 |
+| Final Train Loss | 0.94 |
+| Train Accuracy | ~60% |
+| Val Accuracy | ~65–68% |
+
+This dataset provides a meaningful, non-trivial benchmark: the model learns real patterns (loss decreasing from 1.51 to 0.94) but doesn't achieve trivial 100% accuracy due to genuine class overlap in the data. Comparable to typical ML baselines for this dataset (50–65% accuracy with simple models).
+
+### Dataset Details
+
+- **Source**: UCI Machine Learning Repository (red wine subset)
+- **Features**: fixed acidity, volatile acidity, citric acid, residual sugar, chlorides, free/total sulfur dioxide, density, pH, sulphates, alcohol
+- **Classes**: 6 quality levels (scores 3–8 remapped to 0–5)
+- **Preprocessing**: min-max normalization, stratified 80/20 split
+- **Class distribution**: imbalanced (42.6% class 5, 39.9% class 6, 12.4% class 7, etc.)
 
 ## Example: XOR Network
 
@@ -314,10 +348,13 @@ Neural Assembly/
 │   ├── xor_config.ini
 │   ├── mnist_config.ini
 │   ├── sine_config.ini
+│   ├── wine_quality_config.ini
 │   └── ...
 ├── tools/
 │   ├── gen_synth.py    # Synthetic data generator
-│   └── gen_datasets.py # Dataset generator for examples
+│   ├── gen_datasets.py # Dataset generator for examples
+│   ├── prepare_wine_quality.py  # UCI Wine Quality downloader
+│   └── run_validation_suite.py  # Validation runner
 ├── csv/                # Training data
 └── README.md           # This file
 ```
@@ -363,6 +400,28 @@ This is an educational project demonstrating low-level ML implementation. Contri
 - Performance optimizations
 - Additional layer types
 - Better documentation
+
+## Feature Roadmap
+
+Planned features for future development, ordered by priority:
+
+### High Priority
+- **Confusion Matrix & Per-Class Metrics** — Precision, recall, F1-score per class for multi-class problems (essential for imbalanced datasets like Wine Quality)
+- **Early Stopping** — Monitor validation loss, stop training when it stagnates (patience-based), save best model checkpoint automatically
+- **Learning Rate Scheduling** — Step decay, exponential decay, cosine annealing, and warmup schedules (currently only fixed LR decay in SGD)
+- **NaN/Inf Detection** — Guard against numerical instability during training; log warnings and optionally halt on first NaN gradient
+
+### Medium Priority  
+- **Gradient Norm Logging** — Track and optionally log L2 norm of gradients per layer each epoch for diagnosing vanishing/exploding gradients
+- **Class-Balanced Sampling** — Weighted random sampling for imbalanced datasets; oversampling minority classes during batch construction
+- **Weight Initialization Strategies** — He/Kaiming init for ReLU networks, Xavier/Glorot for sigmoid/tanh (currently using random uniform)
+- **Dropout Regularization** — Inverted dropout during training with automatic disable at inference time
+
+### Future
+- **Additional Datasets** — Iris (simple baseline), CIFAR-10 (image classification), Boston Housing (regression)
+- **TensorBoard-Compatible Logging** — Write TFEvent files for loss/accuracy visualization
+- **Model Pruning** — Magnitude-based weight pruning for smaller models
+- **Quantization** — INT8 inference with calibration for faster forward pass
 
 ## License
 

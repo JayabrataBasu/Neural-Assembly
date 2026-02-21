@@ -234,6 +234,11 @@ def build_test_plan(tier: str) -> List[Tuple[str, str, bool]]:
                     "./neural_framework infer configs/mnist_config.ini /tmp/na_mnist_model.bin",
                     False,
                 ),
+                (
+                    "train:wine",
+                    "./neural_framework train configs/wine_quality_config.ini /tmp/na_wine_model.bin",
+                    False,
+                ),
             ]
         )
 
