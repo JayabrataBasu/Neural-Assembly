@@ -442,6 +442,13 @@ _lib.neural_optimizer_get_lr.argtypes = [
     ctypes.c_void_p,   # Optimizer* opt
 ]
 
+# Gradient clipping (optimizers.asm via neural_api.asm)
+_lib.neural_clip_grad_norm.restype = ctypes.c_int
+_lib.neural_clip_grad_norm.argtypes = [
+    ctypes.c_void_p,   # NeuralOptimizer* opt
+    ctypes.c_double,    # max_norm
+]
+
 # Class-balanced sampling
 _lib.neural_compute_class_weights.restype = ctypes.c_int
 _lib.neural_compute_class_weights.argtypes = [

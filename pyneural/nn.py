@@ -184,6 +184,118 @@ class Tanh(Module):
         return "Tanh()"
 
 
+class Dropout(Module):
+    """
+    Inverted dropout regularization layer.
+
+    During training, randomly zeroes elements with probability ``p`` and
+    scales the remaining elements by ``1 / (1 - p)`` so that the expected
+    sum is unchanged.  During evaluation (``model.eval()``), acts as an
+    identity function.
+
+    Backed by assembly kernels ``dropout_forward`` / ``dropout_backward``
+    in training_ops.asm.
+
+    Args:
+        p: Probability of an element being zeroed (default: 0.5).
+
+    Example:
+        >>> drop = Dropout(p=0.3)
+        >>> x = Tensor.ones([4, 10])
+        >>> y = drop(x)           # ~30 % of elements are zero
+        >>> drop.eval()
+        >>> y2 = drop(x)          # identity in eval mode
+    """
+
+    def __init__(self, p: float = 0.5):
+        super().__init__()
+        if not 0.0 <= p <= 1.0:
+            raise ValueError(f"Dropout probability must be in [0, 1], got {p}")
+        self.p = p
+        # Mask from the last forward pass (needed for backward)
+        self._mask: Optional[ctypes.Array] = None
+        self._numel: int = 0
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Forward pass.
+
+        Args:
+            x: Input tensor of any shape.
+
+        Returns:
+            Output tensor of the same shape.
+        """
+        # Eval mode or p == 0 → identity
+        if not self._training or self.p == 0.0:
+            output = Tensor.create(x.shape, x.dtype)
+            _lib.neural_tensor_copy(output._ptr, x._ptr)
+            return output
+
+        # p == 1 → all zeros
+        if self.p == 1.0:
+            output = Tensor.create(x.shape, x.dtype)
+            output.fill(0.0)
+            # Store all-zero mask for backward
+            numel = int(_lib.neural_tensor_numel(x._ptr))
+            self._mask = (ctypes.c_uint8 * numel)(*([0] * numel))
+            self._numel = numel
+            return output
+
+        numel = int(_lib.neural_tensor_numel(x._ptr))
+        output = Tensor.create(x.shape, x.dtype)
+
+        # Allocate mask buffer (uint8 per element)
+        mask = (ctypes.c_uint8 * numel)()
+
+        input_data = _lib.neural_tensor_data(x._ptr)
+        output_data = _lib.neural_tensor_data(output._ptr)
+
+        result = _lib.neural_dropout_forward(
+            input_data,
+            output_data,
+            ctypes.cast(mask, ctypes.c_void_p),
+            ctypes.c_uint64(numel),
+            ctypes.c_float(self.p),
+        )
+        _check_error(result, "dropout forward")
+
+        self._mask = mask
+        self._numel = numel
+        return output
+
+    def backward(self, grad_output: Tensor) -> Tensor:
+        """
+        Backward pass — apply the same mask used in forward.
+
+        Args:
+            grad_output: Gradient of the loss w.r.t. the output.
+
+        Returns:
+            Gradient of the loss w.r.t. the input.
+        """
+        if self._mask is None:
+            raise RuntimeError("Dropout.backward called before forward")
+
+        grad_input = Tensor.create(grad_output.shape, grad_output.dtype)
+
+        go_data = _lib.neural_tensor_data(grad_output._ptr)
+        gi_data = _lib.neural_tensor_data(grad_input._ptr)
+
+        result = _lib.neural_dropout_backward(
+            go_data,
+            gi_data,
+            ctypes.cast(self._mask, ctypes.c_void_p),
+            ctypes.c_uint64(self._numel),
+            ctypes.c_float(self.p),
+        )
+        _check_error(result, "dropout backward")
+        return grad_input
+
+    def __repr__(self) -> str:
+        return f"Dropout(p={self.p})"
+
+
 class Sequential(Module):
     """
     A sequential container of modules.

@@ -242,6 +242,12 @@ class Trainer:
             train_loss = train_fn()
             self.history.train_loss.append(train_loss)
 
+            # --- Gradient clipping (applied to optimizer's tracked params) ---
+            if cfg.grad_clip_norm is not None and self.optimizer is not None:
+                opt_ptr = getattr(self.optimizer, "_ptr", None)
+                if opt_ptr:
+                    _lib.neural_clip_grad_norm(opt_ptr, float(cfg.grad_clip_norm))
+
             # --- Scheduler step ---
             if self.scheduler is not None:
                 lr = self.scheduler.step()

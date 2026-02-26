@@ -27,7 +27,7 @@ Example Usage:
 """
 
 from .tensor import Tensor
-from .nn import Linear, ReLU, Sigmoid, Softmax, Sequential, MSELoss, CrossEntropyLoss
+from .nn import Linear, ReLU, Sigmoid, Softmax, Dropout, Sequential, MSELoss, CrossEntropyLoss
 from .optim import SGD, Adam
 from .autograd import (
     no_grad,
@@ -99,6 +99,7 @@ __all__ = [
     "ReLU",
     "Sigmoid",
     "Softmax",
+    "Dropout",
     "Sequential",
     # Loss Functions
     "MSELoss",
