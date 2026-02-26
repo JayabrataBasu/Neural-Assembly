@@ -27,7 +27,11 @@ Example Usage:
 """
 
 from .tensor import Tensor
-from .nn import Linear, ReLU, Sigmoid, Softmax, Dropout, Sequential, MSELoss, CrossEntropyLoss
+from .nn import (
+    Linear, ReLU, Sigmoid, Softmax, Dropout, Sequential,
+    BatchNorm1d, LayerNorm,
+    MSELoss, CrossEntropyLoss,
+)
 from .optim import SGD, Adam
 from .autograd import (
     no_grad,
@@ -102,6 +106,9 @@ __all__ = [
     "Softmax",
     "Dropout",
     "Sequential",
+    # Normalization
+    "BatchNorm1d",
+    "LayerNorm",
     # Loss Functions
     "MSELoss",
     "CrossEntropyLoss",

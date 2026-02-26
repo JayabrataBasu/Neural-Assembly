@@ -350,6 +350,143 @@ class Sequential(Module):
         return "\n".join(lines)
 
 
+# Normalization layers
+
+class BatchNorm1d(Module):
+    """
+    Batch Normalization over a 2D input (B × C).
+
+    During training, normalises using batch statistics and updates
+    running mean/var via exponential moving average.  During evaluation,
+    uses the accumulated running statistics.
+
+    Backed by C implementation in batchnorm.c using float64 arrays.
+
+    Args:
+        num_features: Number of features (C dimension).
+        momentum: EMA coefficient for running stats (default: 0.1).
+        eps: Small constant for numerical stability (default: 1e-5).
+
+    Example:
+        >>> bn = BatchNorm1d(64)
+        >>> x = ...  # (batch, 64) float64 array
+        >>> y = bn.forward_f64(x_ptr, out_ptr, batch_size)
+    """
+
+    def __init__(self, num_features: int, momentum: float = 0.1, eps: float = 1e-5):
+        super().__init__()
+        self.num_features = num_features
+        self.momentum = momentum
+        self.eps = eps
+
+        self._ptr = _lib.batchnorm1d_create(num_features, momentum, eps)
+        if self._ptr is None or self._ptr == 0:
+            raise NeuralException(0, "Failed to create BatchNorm1d")
+
+    def __del__(self):
+        if hasattr(self, "_ptr") and self._ptr:
+            _lib.batchnorm1d_free(self._ptr)
+            self._ptr = None
+
+    def forward_f64(self, input_ptr, output_ptr, batch_size: int) -> int:
+        """
+        Forward pass on raw float64 pointers.
+
+        Args:
+            input_ptr: ctypes pointer to input data (B × C doubles).
+            output_ptr: ctypes pointer to output buffer (B × C doubles).
+            batch_size: Number of samples in the batch.
+
+        Returns:
+            0 on success.
+        """
+        return _lib.batchnorm1d_forward(
+            self._ptr, input_ptr, output_ptr,
+            batch_size, 1 if self._training else 0
+        )
+
+    def backward_f64(self, grad_out_ptr, grad_in_ptr,
+                     grad_gamma_ptr, grad_beta_ptr, batch_size: int) -> int:
+        """Backward pass on raw float64 pointers."""
+        return _lib.batchnorm1d_backward(
+            self._ptr, grad_out_ptr, grad_in_ptr,
+            grad_gamma_ptr, grad_beta_ptr, batch_size
+        )
+
+    @property
+    def gamma_ptr(self):
+        return _lib.batchnorm1d_gamma(self._ptr)
+
+    @property
+    def beta_ptr(self):
+        return _lib.batchnorm1d_beta(self._ptr)
+
+    @property
+    def running_mean_ptr(self):
+        return _lib.batchnorm1d_running_mean(self._ptr)
+
+    @property
+    def running_var_ptr(self):
+        return _lib.batchnorm1d_running_var(self._ptr)
+
+    def __repr__(self) -> str:
+        return f"BatchNorm1d({self.num_features}, momentum={self.momentum}, eps={self.eps})"
+
+
+class LayerNorm(Module):
+    """
+    Layer Normalization over the last dimension of a 2D input (B × C).
+
+    Normalises across features for each sample independently.
+    Always uses the sample's own statistics (no running stats).
+
+    Backed by C implementation in batchnorm.c using float64 arrays.
+
+    Args:
+        num_features: Number of features (C dimension).
+        eps: Small constant for numerical stability (default: 1e-5).
+    """
+
+    def __init__(self, num_features: int, eps: float = 1e-5):
+        super().__init__()
+        self.num_features = num_features
+        self.eps = eps
+
+        self._ptr = _lib.layernorm_create(num_features, eps)
+        if self._ptr is None or self._ptr == 0:
+            raise NeuralException(0, "Failed to create LayerNorm")
+
+    def __del__(self):
+        if hasattr(self, "_ptr") and self._ptr:
+            _lib.layernorm_free(self._ptr)
+            self._ptr = None
+
+    def forward_f64(self, input_ptr, output_ptr, batch_size: int) -> int:
+        """Forward pass on raw float64 pointers."""
+        return _lib.layernorm_forward(
+            self._ptr, input_ptr, output_ptr, batch_size
+        )
+
+    def backward_f64(self, grad_out_ptr, grad_in_ptr,
+                     grad_gamma_ptr, grad_beta_ptr, batch_size: int) -> int:
+        """Backward pass on raw float64 pointers."""
+        return _lib.layernorm_backward(
+            self._ptr, grad_out_ptr, grad_in_ptr,
+            grad_gamma_ptr, grad_beta_ptr, batch_size
+        )
+
+    @property
+    def gamma_ptr(self):
+        return _lib.layernorm_gamma(self._ptr)
+
+    @property
+    def beta_ptr(self):
+        return _lib.layernorm_beta(self._ptr)
+
+    def __repr__(self) -> str:
+        return f"LayerNorm({self.num_features}, eps={self.eps})"
+
+
 # Loss functions
 
 class MSELoss(Module):
