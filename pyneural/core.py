@@ -469,6 +469,175 @@ _lib.neural_weighted_sample_indices.argtypes = [
     ctypes.c_int,      # seed
 ]
 
+# ── TensorBoard logging (tb_logger.c) ──────────────────────────
+_lib.tb_create_writer.restype = ctypes.c_int
+_lib.tb_create_writer.argtypes = [ctypes.c_char_p]
+
+_lib.tb_add_scalar.restype = ctypes.c_int
+_lib.tb_add_scalar.argtypes = [
+    ctypes.c_int,       # handle
+    ctypes.c_char_p,    # tag
+    ctypes.c_float,     # value
+    ctypes.c_int64,     # step
+]
+
+_lib.tb_add_scalars.restype = ctypes.c_int
+_lib.tb_add_scalars.argtypes = [
+    ctypes.c_int,       # handle
+    ctypes.c_char_p,    # tag_prefix
+    ctypes.c_void_p,    # const char** subtags
+    ctypes.c_void_p,    # const float* values
+    ctypes.c_int,       # count
+    ctypes.c_int64,     # step
+]
+
+_lib.tb_add_histogram_stats.restype = ctypes.c_int
+_lib.tb_add_histogram_stats.argtypes = [
+    ctypes.c_int,       # handle
+    ctypes.c_char_p,    # tag
+    ctypes.c_void_p,    # const float* data
+    ctypes.c_int,       # count
+    ctypes.c_int64,     # step
+]
+
+_lib.tb_flush.restype = ctypes.c_int
+_lib.tb_flush.argtypes = [ctypes.c_int]
+
+_lib.tb_close.restype = ctypes.c_int
+_lib.tb_close.argtypes = [ctypes.c_int]
+
+_lib.tb_get_logdir.restype = ctypes.c_char_p
+_lib.tb_get_logdir.argtypes = [ctypes.c_int]
+
+_lib.tb_get_filepath.restype = ctypes.c_char_p
+_lib.tb_get_filepath.argtypes = [ctypes.c_int]
+
+# ── Model pruning (pruning.c) ──────────────────────────────────
+_lib.prune_magnitude.restype = ctypes.c_int64
+_lib.prune_magnitude.argtypes = [
+    ctypes.c_void_p,    # double* weights
+    ctypes.c_void_p,    # uint8_t* mask (may be NULL)
+    ctypes.c_int64,     # n
+    ctypes.c_double,    # threshold
+]
+
+_lib.prune_topk.restype = ctypes.c_int64
+_lib.prune_topk.argtypes = [
+    ctypes.c_void_p,    # double* weights
+    ctypes.c_void_p,    # uint8_t* mask (may be NULL)
+    ctypes.c_int64,     # n
+    ctypes.c_double,    # keep_ratio
+]
+
+_lib.prune_rows.restype = ctypes.c_int64
+_lib.prune_rows.argtypes = [
+    ctypes.c_void_p,    # double* weights
+    ctypes.c_int64,     # rows
+    ctypes.c_int64,     # cols
+    ctypes.c_double,    # threshold
+    ctypes.c_void_p,    # uint8_t* row_mask (may be NULL)
+]
+
+_lib.prune_cols.restype = ctypes.c_int64
+_lib.prune_cols.argtypes = [
+    ctypes.c_void_p,    # double* weights
+    ctypes.c_int64,     # rows
+    ctypes.c_int64,     # cols
+    ctypes.c_double,    # threshold
+    ctypes.c_void_p,    # uint8_t* col_mask (may be NULL)
+]
+
+_lib.compute_sparsity.restype = ctypes.c_double
+_lib.compute_sparsity.argtypes = [ctypes.c_void_p, ctypes.c_int64]
+
+_lib.count_nonzero.restype = ctypes.c_int64
+_lib.count_nonzero.argtypes = [ctypes.c_void_p, ctypes.c_int64]
+
+_lib.compute_threshold_for_sparsity.restype = ctypes.c_double
+_lib.compute_threshold_for_sparsity.argtypes = [
+    ctypes.c_void_p,    # const double* weights
+    ctypes.c_int64,     # n
+    ctypes.c_double,    # target_sparsity
+]
+
+_lib.apply_mask.restype = None
+_lib.apply_mask.argtypes = [
+    ctypes.c_void_p,    # double* weights
+    ctypes.c_void_p,    # const uint8_t* mask
+    ctypes.c_int64,     # n
+]
+
+# ── INT8 Quantization (quantize.c) ─────────────────────────────
+
+# QuantParams struct: scale(f64), zero_point(i32), min_val(f64), max_val(f64), symmetric(i32)
+class QuantParamsC(ctypes.Structure):
+    _fields_ = [
+        ("scale", ctypes.c_double),
+        ("zero_point", ctypes.c_int32),
+        ("min_val", ctypes.c_double),
+        ("max_val", ctypes.c_double),
+        ("symmetric", ctypes.c_int),
+    ]
+
+_lib.calibrate_minmax.restype = ctypes.c_int
+_lib.calibrate_minmax.argtypes = [
+    ctypes.c_void_p,                   # const double* data
+    ctypes.c_int64,                    # n
+    ctypes.c_int,                      # symmetric
+    ctypes.POINTER(QuantParamsC),      # QuantParams* out
+]
+
+_lib.calibrate_percentile.restype = ctypes.c_int
+_lib.calibrate_percentile.argtypes = [
+    ctypes.c_void_p,                   # const double* data
+    ctypes.c_int64,                    # n
+    ctypes.c_double,                   # percentile
+    ctypes.c_int,                      # symmetric
+    ctypes.POINTER(QuantParamsC),      # QuantParams* out
+]
+
+_lib.quantize_tensor.restype = ctypes.c_int
+_lib.quantize_tensor.argtypes = [
+    ctypes.c_void_p,                   # const double* data
+    ctypes.c_void_p,                   # int8_t* out
+    ctypes.c_int64,                    # n
+    ctypes.POINTER(QuantParamsC),      # const QuantParams* params
+]
+
+_lib.dequantize_tensor.restype = ctypes.c_int
+_lib.dequantize_tensor.argtypes = [
+    ctypes.c_void_p,                   # const int8_t* data
+    ctypes.c_void_p,                   # double* out
+    ctypes.c_int64,                    # n
+    ctypes.POINTER(QuantParamsC),      # const QuantParams* params
+]
+
+_lib.quantized_matmul.restype = ctypes.c_int
+_lib.quantized_matmul.argtypes = [
+    ctypes.c_void_p,                   # const int8_t* A
+    ctypes.c_void_p,                   # const int8_t* B
+    ctypes.c_void_p,                   # double* C
+    ctypes.c_int64,                    # M
+    ctypes.c_int64,                    # K
+    ctypes.c_int64,                    # N
+    ctypes.POINTER(QuantParamsC),      # params_a
+    ctypes.POINTER(QuantParamsC),      # params_b
+]
+
+_lib.quantization_error.restype = ctypes.c_double
+_lib.quantization_error.argtypes = [
+    ctypes.c_void_p,                   # const double* original
+    ctypes.c_int64,                    # n
+    ctypes.POINTER(QuantParamsC),      # const QuantParams* params
+]
+
+_lib.quantization_snr.restype = ctypes.c_double
+_lib.quantization_snr.argtypes = [
+    ctypes.c_void_p,                   # const double* original
+    ctypes.c_int64,                    # n
+    ctypes.POINTER(QuantParamsC),      # const QuantParams* params
+]
+
 
 def _check_error(result: int, operation: str = "operation"):
     """Check result code and raise exception if error."""

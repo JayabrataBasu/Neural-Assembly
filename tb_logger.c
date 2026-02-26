@@ -1,7 +1,7 @@
 /* ============================================================================
  * tb_logger.c — TensorBoard-Compatible Event Logger
  * ============================================================================
- * Writes TFRecord/TFEvent files that TensorBoard can read directly.
+ * It writeh TFRecord/TFEvent files that TensorBoard can read directly.
  *
  * File format (TFRecord):
  *   uint64  data_length
@@ -15,6 +15,8 @@
  * The assembly math kernels in training_ops.asm handle the hot-path
  * numerical work (norms, thresholds, etc.).  This file handles the I/O-
  * heavy, format-heavy logic that would be painful in pure assembly.
+ * like trust me it is a miracle that I am still sane after writing this code in C without any 
+ * protobuf library, and I hope you appreciate the effort that went into it
  * ============================================================================ */
 
 #include <stdio.h>
@@ -23,7 +25,6 @@
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
-#include <math.h>
 
 /* ---- CRC32C (Castagnoli) ------------------------------------------------- */
 
@@ -288,8 +289,7 @@ int tb_add_scalars(int handle, const char *tag_prefix,
  * TensorBoard histograms use a specific protobuf but we write scalars as
  * a pragmatic fallback that shows up in the SCALARS tab.
  */
-int tb_add_histogram_stats(int handle, const char *tag,
-                           const float *data, int count, int64_t step) {
+int tb_add_histogram_stats(int handle, const char *tag, const float *data, int count, int64_t step) {
     if (handle < 0 || handle >= writers_used || !data || count <= 0)
         return -1;
 

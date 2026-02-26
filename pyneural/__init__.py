@@ -71,6 +71,9 @@ from .schedulers import (
     ReduceLROnPlateau,
 )
 from .training import Trainer, TrainerConfig, TrainingHistory, EarlyStopping, NaNDetector
+from .tb_logger import SummaryWriter
+from .pruning import Pruner, prune_magnitude, prune_rows, prune_cols
+from .quantize import Quantizer, QuantParams, quantized_matmul
 
 import importlib as _importlib
 weight_init = _importlib.import_module('.init', __name__)
@@ -78,7 +81,7 @@ weight_init = _importlib.import_module('.init', __name__)
 # Re-import core.init to ensure pn.init() is the framework initializer
 from .core import init
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __all__ = [
     # Core
     "init",
@@ -119,6 +122,7 @@ __all__ = [
     "Sampler",
     "SequentialSampler",
     "RandomSampler",
+    "WeightedRandomSampler",
     "BatchSampler",
     "Config",
     # Metrics
@@ -139,4 +143,15 @@ __all__ = [
     "NaNDetector",
     # Weight Initialization
     "weight_init",
+    # TensorBoard Logging
+    "SummaryWriter",
+    # Pruning
+    "Pruner",
+    "prune_magnitude",
+    "prune_rows",
+    "prune_cols",
+    # Quantization
+    "Quantizer",
+    "QuantParams",
+    "quantized_matmul",
 ]

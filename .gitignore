@@ -53,3 +53,6 @@ Desktop.ini
 verify_correctness.py
 test_input.csv
 xor_model.bin
+
+# Internal dev log (not tracked)
+.devlog.txt

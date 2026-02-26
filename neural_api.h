@@ -790,6 +790,215 @@ double neural_config_get_float(NeuralConfig* config, const char* section, const 
  */
 const char* neural_config_get_string(NeuralConfig* config, const char* section, const char* key, const char* default_value);
 
+/* ============================================================================ */
+/* TensorBoard Logging (implemented in tb_logger.c)                             */
+/* ============================================================================ */
+
+/**
+ * @brief Create a TensorBoard event file writer.
+ * @param logdir Directory path for event files (created if needed)
+ * @return Writer handle (>=0) on success, -1 on error
+ */
+int tb_create_writer(const char *logdir);
+
+/**
+ * @brief Log a scalar value.
+ * @param handle Writer handle from tb_create_writer
+ * @param tag Metric name (e.g. "loss/train")
+ * @param value Scalar value
+ * @param step Global step number
+ * @return 0 on success, -1 on error
+ */
+int tb_add_scalar(int handle, const char *tag, float value, int64_t step);
+
+/**
+ * @brief Log multiple scalars under a common tag prefix.
+ * @param handle Writer handle
+ * @param tag_prefix Common prefix (e.g. "loss")
+ * @param subtags Array of sub-tag strings (e.g. ["train", "val"])
+ * @param values Corresponding float values
+ * @param count Number of scalars
+ * @param step Global step number
+ * @return 0 on success, -1 on error
+ */
+int tb_add_scalars(int handle, const char *tag_prefix,
+                   const char **subtags, const float *values,
+                   int count, int64_t step);
+
+/**
+ * @brief Log histogram statistics (min/max/mean) as scalars.
+ * @param handle Writer handle
+ * @param tag Base tag name
+ * @param data Float array of values
+ * @param count Number of values
+ * @param step Global step number
+ * @return 0 on success, -1 on error
+ */
+int tb_add_histogram_stats(int handle, const char *tag,
+                           const float *data, int count, int64_t step);
+
+/**
+ * @brief Flush pending writes to disk.
+ * @param handle Writer handle
+ * @return 0 on success
+ */
+int tb_flush(int handle);
+
+/**
+ * @brief Close a writer and release resources.
+ * @param handle Writer handle
+ * @return 0 on success
+ */
+int tb_close(int handle);
+
+/**
+ * @brief Get the log directory for a writer.
+ * @param handle Writer handle
+ * @return Log directory string, or NULL
+ */
+const char *tb_get_logdir(int handle);
+
+/**
+ * @brief Get the event file path for a writer.
+ * @param handle Writer handle
+ * @return File path string, or NULL
+ */
+const char *tb_get_filepath(int handle);
+
+/* ============================================================================ */
+/* Model Pruning (implemented in pruning.c)                                     */
+/* ============================================================================ */
+
+/**
+ * @brief Unstructured magnitude pruning — zero weights with |w| < threshold.
+ * @param weights Float64 weight array (modified in-place)
+ * @param mask Output uint8 mask (1=kept, 0=pruned; may be NULL)
+ * @param n Number of elements
+ * @param threshold Absolute value threshold
+ * @return Number of weights pruned, or -1 on error
+ */
+int64_t prune_magnitude(double *weights, uint8_t *mask, int64_t n, double threshold);
+
+/**
+ * @brief Keep only the top-k weights by magnitude, prune the rest.
+ * @param weights Float64 weight array (modified in-place)
+ * @param mask Output uint8 mask (may be NULL)
+ * @param n Number of elements
+ * @param keep_ratio Fraction to keep (0.0 to 1.0)
+ * @return Number pruned, or -1 on error
+ */
+int64_t prune_topk(double *weights, uint8_t *mask, int64_t n, double keep_ratio);
+
+/**
+ * @brief Structured row pruning — zero entire rows with L2 norm < threshold.
+ * @param weights Float64 matrix (rows x cols, row-major)
+ * @param rows Number of rows
+ * @param cols Number of columns
+ * @param threshold L2 norm threshold
+ * @param row_mask Output mask per row (may be NULL)
+ * @return Number of rows pruned, or -1 on error
+ */
+int64_t prune_rows(double *weights, int64_t rows, int64_t cols,
+                   double threshold, uint8_t *row_mask);
+
+/**
+ * @brief Structured column pruning — zero entire columns with L2 norm < threshold.
+ */
+int64_t prune_cols(double *weights, int64_t rows, int64_t cols,
+                   double threshold, uint8_t *col_mask);
+
+/**
+ * @brief Compute sparsity ratio (fraction of zeros).
+ */
+double compute_sparsity(const double *weights, int64_t n);
+
+/**
+ * @brief Count non-zero elements.
+ */
+int64_t count_nonzero(const double *weights, int64_t n);
+
+/**
+ * @brief Find threshold that achieves target sparsity.
+ * @param weights Float64 array
+ * @param n Number of elements
+ * @param target_sparsity Desired zero fraction (0.0 to 1.0)
+ * @return Magnitude threshold
+ */
+double compute_threshold_for_sparsity(const double *weights, int64_t n,
+                                      double target_sparsity);
+
+/**
+ * @brief Re-apply a pruning mask (e.g. after optimizer step).
+ * @param weights Float64 array (modified in-place)
+ * @param mask Uint8 mask (1=keep, 0=zero)
+ * @param n Number of elements
+ */
+void apply_mask(double *weights, const uint8_t *mask, int64_t n);
+
+/* ============================================================================ */
+/* INT8 Quantization (implemented in quantize.c)                                */
+/* ============================================================================ */
+
+/** Quantization parameters. */
+typedef struct {
+    double  scale;
+    int32_t zero_point;
+    double  min_val;
+    double  max_val;
+    int     symmetric;
+} QuantParams;
+
+/**
+ * @brief Calibrate quantization params from min/max of data.
+ * @param data Float64 input array
+ * @param n Number of elements
+ * @param symmetric 1 for symmetric, 0 for affine
+ * @param out Output QuantParams
+ * @return 0 on success
+ */
+int calibrate_minmax(const double *data, int64_t n, int symmetric,
+                     QuantParams *out);
+
+/**
+ * @brief Calibrate with percentile clipping for outlier robustness.
+ * @param percentile Clip fraction (e.g. 0.01 clips 1% on each tail)
+ */
+int calibrate_percentile(const double *data, int64_t n, double percentile,
+                         int symmetric, QuantParams *out);
+
+/**
+ * @brief Quantize float64 array to int8.
+ */
+int quantize_tensor(const double *data, int8_t *out, int64_t n,
+                    const QuantParams *params);
+
+/**
+ * @brief Dequantize int8 array back to float64.
+ */
+int dequantize_tensor(const int8_t *data, double *out, int64_t n,
+                      const QuantParams *params);
+
+/**
+ * @brief Quantized int8 matrix multiply with float64 output.
+ * C[M,N] = dequant(A[M,K]) @ dequant(B[K,N])
+ */
+int quantized_matmul(const int8_t *A, const int8_t *B, double *C,
+                     int64_t M, int64_t K, int64_t N,
+                     const QuantParams *params_a,
+                     const QuantParams *params_b);
+
+/**
+ * @brief Compute mean squared quantization error.
+ */
+double quantization_error(const double *original, int64_t n,
+                          const QuantParams *params);
+
+/**
+ * @brief Compute signal-to-noise ratio of quantization (in dB).
+ */
+double quantization_snr(const double *original, int64_t n,
+                        const QuantParams *params);
+
 #ifdef __cplusplus
 }
 #endif

@@ -63,6 +63,22 @@ This project implements a complete neural network training framework in pure x86
   - Dropout forward/backward (inverted, with mask) (assembly)
   - Weight initialization: He/Kaiming, Xavier/Glorot uniform & normal (assembly)
 
+- **TensorBoard Logging** (`tb_logger.c`) — *NEW in v1.2*
+  - TFRecord/TFEvent file writer (CRC32C, protobuf encoding in C)
+  - Scalar, multi-scalar, and histogram-stats logging
+  - Compatible with `tensorboard --logdir`
+
+- **Model Pruning** (`pruning.c`) — *NEW in v1.2*
+  - Unstructured magnitude pruning (threshold & top-k)
+  - Structured row/column pruning (L2 norm)
+  - Sparsity analysis, mask reapply, threshold search
+
+- **INT8 Quantization** (`quantize.c`) — *NEW in v1.2*
+  - Symmetric & affine (asymmetric) quantization
+  - MinMax and percentile calibration
+  - Quantized int8 matrix multiply (int32 accumulation)
+  - Error analysis: MSE and SNR metrics
+
 - **Data Loading** (`dataset.asm`)
   - CSV file parsing
   - Mini-batch loading
@@ -425,11 +441,11 @@ Status of planned features (ordered by priority):
 - ✅ **Dropout Regularization** — Inverted dropout forward/backward in assembly (`dropout_forward`/`dropout_backward`)
 - ✅ **Class-Balanced Sampling** — Assembly `compute_class_weights`/`compute_sample_weights`/`weighted_sample_indices`; Python `WeightedRandomSampler`
 
-### Future
-- 🔲 **Additional Datasets** — ✅ Iris (4→16→3, `prepare_iris.py`), 🔲 CIFAR-10 (image classification), 🔲 Boston Housing (regression)
-- 🔲 **TensorBoard-Compatible Logging** — Write TFEvent files for loss/accuracy visualization
-- 🔲 **Model Pruning** — Magnitude-based weight pruning for smaller models
-- 🔲 **Quantization** — INT8 inference with calibration for faster forward pass
+### Future — ✅ Complete
+- ✅ **Additional Datasets** — Iris (4→16→3, `prepare_iris.py`), CIFAR-10 (`prepare_cifar10.py`), Boston Housing (`prepare_boston.py`)
+- ✅ **TensorBoard-Compatible Logging** — C `tb_logger.c` writes TFEvent files; Python `SummaryWriter` wrapper
+- ✅ **Model Pruning** — C `pruning.c`: magnitude, top-k, structured row/column; Python `Pruner` class
+- ✅ **Quantization** — C `quantize.c`: INT8 affine/symmetric, calibration, quantized matmul; Python `Quantizer` class
 
 ## License
 
