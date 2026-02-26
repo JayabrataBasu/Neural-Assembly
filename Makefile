@@ -7,8 +7,10 @@ NASM = nasm
 NASMFLAGS = -f elf64 -g -F dwarf
 NASMFLAGS_PIC = -f elf64 -g -F dwarf -DPIC
 
-# Linker
-LD = ld
+# C compiler and flags
+CC = gcc
+CFLAGS = -Wall -Wextra -O2 -g -std=c11
+CFLAGS_PIC = $(CFLAGS) -fPIC
 
 # Output binary
 TARGET = neural_framework
@@ -20,30 +22,8 @@ ifneq ("$(wildcard .neuasm/bin/python)","")
 PYTHON := ./.neuasm/bin/python
 endif
 
-# Source files (order matters for dependencies)
-SRCS = mem.asm \
-       utils.asm \
-       error.asm \
-       simd.asm \
-       tensor.asm \
-       math_kernels.asm \
-       autograd.asm \
-       activations.asm \
-       nn_layers.asm \
-       losses.asm \
-       optimizers.asm \
-       dataset.asm \
-       model_io.asm \
-       config_parser.asm \
-       threads.asm \
-       training_ops.asm \
-       tests.asm \
-       verify.asm \
-       compat.asm \
-       main.asm
-
-# Library source files (excluding main.asm for shared library)
-LIB_SRCS = mem.asm \
+# Assembly source files (order matters for dependencies)
+ASM_SRCS = mem.asm \
            utils.asm \
            error.asm \
            simd.asm \
@@ -62,12 +42,47 @@ LIB_SRCS = mem.asm \
            tests.asm \
            verify.asm \
            compat.asm \
-           neural_api.asm
+           main.asm
 
-# Object files
-OBJS = $(SRCS:.asm=.o)
-LIB_OBJS = $(LIB_SRCS:.asm=.o)
-PIC_OBJS = $(LIB_SRCS:.asm=.pic.o)
+# C source files (complex features best written in C)
+C_SRCS = tb_logger.c \
+         pruning.c \
+         quantize.c
+
+# Library assembly sources (excluding main.asm for shared library)
+LIB_ASM_SRCS = mem.asm \
+               utils.asm \
+               error.asm \
+               simd.asm \
+               tensor.asm \
+               math_kernels.asm \
+               autograd.asm \
+               activations.asm \
+               nn_layers.asm \
+               losses.asm \
+               optimizers.asm \
+               dataset.asm \
+               model_io.asm \
+               config_parser.asm \
+               threads.asm \
+               training_ops.asm \
+               tests.asm \
+               verify.asm \
+               compat.asm \
+               neural_api.asm
+
+# Library C sources (same as C_SRCS — all go into shared lib)
+LIB_C_SRCS = $(C_SRCS)
+
+# Object files — main binary
+ASM_OBJS = $(ASM_SRCS:.asm=.o)
+C_OBJS = $(C_SRCS:.c=.o)
+OBJS = $(ASM_OBJS) $(C_OBJS)
+
+# Object files — shared library (PIC)
+LIB_ASM_PIC = $(LIB_ASM_SRCS:.asm=.pic.o)
+LIB_C_PIC = $(LIB_C_SRCS:.c=.pic.o)
+PIC_OBJS = $(LIB_ASM_PIC) $(LIB_C_PIC)
 
 # Phony targets
 .PHONY: all clean debug help run-test lib shared install validate validate-smoke
@@ -80,7 +95,6 @@ lib: $(SHARED_LIB)
 shared: $(SHARED_LIB)
 
 # Link all object files into final executable using gcc (links libc/libm)
-CC = gcc
 LDFLAGS = -lm -lpthread -no-pie
 LDFLAGS_SHARED = -shared -lm -lpthread -Wl,-Bsymbolic
 
@@ -91,7 +105,7 @@ $(TARGET): $(OBJS)
 $(SHARED_LIB): $(PIC_OBJS)
 	$(CC) $(LDFLAGS_SHARED) -fPIC -o $@ $^
 
-# Assemble each source file
+# Assemble each source file (non-PIC for main binary)
 %.o: %.asm
 	$(NASM) $(NASMFLAGS) -o $@ $<
 
@@ -99,13 +113,21 @@ $(SHARED_LIB): $(PIC_OBJS)
 %.pic.o: %.asm
 	$(NASM) $(NASMFLAGS_PIC) -o $@ $<
 
+# Compile C source files (non-PIC for main binary)
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# Compile C source files (PIC for shared library)
+%.pic.o: %.c
+	$(CC) $(CFLAGS_PIC) -c -o $@ $<
+
 # Debug build with extra symbols
 debug: NASMFLAGS += -g -F dwarf -l $*.lst
 debug: clean all
 
 # Clean build artifacts
 clean:
-	rm -f *.o *.lst $(TARGET) $(SHARED_LIB)
+	rm -f *.o *.pic.o *.lst $(TARGET) $(SHARED_LIB)
 
 # Install shared library (requires sudo)
 install: $(SHARED_LIB)
