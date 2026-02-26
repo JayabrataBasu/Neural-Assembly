@@ -999,6 +999,38 @@ double quantization_error(const double *original, int64_t n,
 double quantization_snr(const double *original, int64_t n,
                         const QuantParams *params);
 
+/* ── BatchNorm1d (batchnorm.c) ────────────────────────────────────── */
+
+typedef struct BatchNorm1d BatchNorm1d;
+
+BatchNorm1d *batchnorm1d_create(int64_t num_features, double momentum, double eps);
+void         batchnorm1d_free(BatchNorm1d *bn);
+int          batchnorm1d_forward(BatchNorm1d *bn, const double *input, double *output,
+                                  int64_t batch_size, int training);
+int          batchnorm1d_backward(BatchNorm1d *bn, const double *grad_output,
+                                   double *grad_input, double *grad_gamma,
+                                   double *grad_beta, int64_t batch_size);
+double      *batchnorm1d_gamma(BatchNorm1d *bn);
+double      *batchnorm1d_beta(BatchNorm1d *bn);
+double      *batchnorm1d_running_mean(BatchNorm1d *bn);
+double      *batchnorm1d_running_var(BatchNorm1d *bn);
+int64_t      batchnorm1d_num_features(BatchNorm1d *bn);
+
+/* ── LayerNorm (batchnorm.c) ──────────────────────────────────────── */
+
+typedef struct LayerNorm LayerNorm;
+
+LayerNorm   *layernorm_create(int64_t num_features, double eps);
+void         layernorm_free(LayerNorm *ln);
+int          layernorm_forward(LayerNorm *ln, const double *input, double *output,
+                               int64_t batch_size);
+int          layernorm_backward(LayerNorm *ln, const double *grad_output,
+                                double *grad_input, double *grad_gamma,
+                                double *grad_beta, int64_t batch_size);
+double      *layernorm_gamma(LayerNorm *ln);
+double      *layernorm_beta(LayerNorm *ln);
+int64_t      layernorm_num_features(LayerNorm *ln);
+
 #ifdef __cplusplus
 }
 #endif

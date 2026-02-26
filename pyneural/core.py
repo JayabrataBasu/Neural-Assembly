@@ -645,6 +645,81 @@ _lib.quantization_snr.argtypes = [
     ctypes.POINTER(QuantParamsC),      # const QuantParams* params
 ]
 
+# ── BatchNorm1d (batchnorm.c) ──────────────────────────────────────
+_lib.batchnorm1d_create.restype = ctypes.c_void_p
+_lib.batchnorm1d_create.argtypes = [ctypes.c_int64, ctypes.c_double, ctypes.c_double]
+
+_lib.batchnorm1d_free.restype = None
+_lib.batchnorm1d_free.argtypes = [ctypes.c_void_p]
+
+_lib.batchnorm1d_forward.restype = ctypes.c_int
+_lib.batchnorm1d_forward.argtypes = [
+    ctypes.c_void_p,   # BatchNorm1d*
+    ctypes.c_void_p,   # const double* input
+    ctypes.c_void_p,   # double* output
+    ctypes.c_int64,    # batch_size
+    ctypes.c_int,      # training
+]
+
+_lib.batchnorm1d_backward.restype = ctypes.c_int
+_lib.batchnorm1d_backward.argtypes = [
+    ctypes.c_void_p,   # BatchNorm1d*
+    ctypes.c_void_p,   # const double* grad_output
+    ctypes.c_void_p,   # double* grad_input
+    ctypes.c_void_p,   # double* grad_gamma
+    ctypes.c_void_p,   # double* grad_beta
+    ctypes.c_int64,    # batch_size
+]
+
+_lib.batchnorm1d_gamma.restype = ctypes.c_void_p
+_lib.batchnorm1d_gamma.argtypes = [ctypes.c_void_p]
+
+_lib.batchnorm1d_beta.restype = ctypes.c_void_p
+_lib.batchnorm1d_beta.argtypes = [ctypes.c_void_p]
+
+_lib.batchnorm1d_running_mean.restype = ctypes.c_void_p
+_lib.batchnorm1d_running_mean.argtypes = [ctypes.c_void_p]
+
+_lib.batchnorm1d_running_var.restype = ctypes.c_void_p
+_lib.batchnorm1d_running_var.argtypes = [ctypes.c_void_p]
+
+_lib.batchnorm1d_num_features.restype = ctypes.c_int64
+_lib.batchnorm1d_num_features.argtypes = [ctypes.c_void_p]
+
+# ── LayerNorm (batchnorm.c) ────────────────────────────────────────
+_lib.layernorm_create.restype = ctypes.c_void_p
+_lib.layernorm_create.argtypes = [ctypes.c_int64, ctypes.c_double]
+
+_lib.layernorm_free.restype = None
+_lib.layernorm_free.argtypes = [ctypes.c_void_p]
+
+_lib.layernorm_forward.restype = ctypes.c_int
+_lib.layernorm_forward.argtypes = [
+    ctypes.c_void_p,   # LayerNorm*
+    ctypes.c_void_p,   # const double* input
+    ctypes.c_void_p,   # double* output
+    ctypes.c_int64,    # batch_size
+]
+
+_lib.layernorm_backward.restype = ctypes.c_int
+_lib.layernorm_backward.argtypes = [
+    ctypes.c_void_p,   # LayerNorm*
+    ctypes.c_void_p,   # const double* grad_output
+    ctypes.c_void_p,   # double* grad_input
+    ctypes.c_void_p,   # double* grad_gamma
+    ctypes.c_void_p,   # double* grad_beta
+    ctypes.c_int64,    # batch_size
+]
+
+_lib.layernorm_gamma.restype = ctypes.c_void_p
+_lib.layernorm_gamma.argtypes = [ctypes.c_void_p]
+
+_lib.layernorm_beta.restype = ctypes.c_void_p
+_lib.layernorm_beta.argtypes = [ctypes.c_void_p]
+
+_lib.layernorm_num_features.restype = ctypes.c_int64
+_lib.layernorm_num_features.argtypes = [ctypes.c_void_p]
+
 
 def _check_error(result: int, operation: str = "operation"):
     """Check result code and raise exception if error."""

@@ -71,6 +71,7 @@ from .schedulers import (
     ReduceLROnPlateau,
 )
 from .training import Trainer, TrainerConfig, TrainingHistory, EarlyStopping, NaNDetector
+from .checkpoint import save_checkpoint, load_checkpoint
 from .tb_logger import SummaryWriter
 from .pruning import Pruner, prune_magnitude, prune_rows, prune_cols
 from .quantize import Quantizer, QuantParams, quantized_matmul
@@ -142,6 +143,9 @@ __all__ = [
     "TrainingHistory",
     "EarlyStopping",
     "NaNDetector",
+    # Checkpoint
+    "save_checkpoint",
+    "load_checkpoint",
     # Weight Initialization
     "weight_init",
     # TensorBoard Logging

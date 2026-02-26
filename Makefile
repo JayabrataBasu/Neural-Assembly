@@ -47,7 +47,8 @@ ASM_SRCS = mem.asm \
 # C source files (complex features best written in C)
 C_SRCS = tb_logger.c \
          pruning.c \
-         quantize.c
+         quantize.c \
+         batchnorm.c
 
 # Library assembly sources (excluding main.asm for shared library)
 LIB_ASM_SRCS = mem.asm \

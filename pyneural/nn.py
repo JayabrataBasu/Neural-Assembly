@@ -101,8 +101,15 @@ class Linear(Module):
     
     def parameters(self) -> List[Tensor]:
         """Get weight and bias tensors."""
-        # TODO: Implement weight/bias getters in native API
-        return []
+        params = []
+        weight_ptr = _lib.neural_linear_weight(self._ptr)
+        if weight_ptr:
+            params.append(Tensor(weight_ptr, owns_data=False))
+        if self.has_bias:
+            bias_ptr = _lib.neural_linear_bias(self._ptr)
+            if bias_ptr:
+                params.append(Tensor(bias_ptr, owns_data=False))
+        return params
     
     def __repr__(self) -> str:
         return f"Linear(in_features={self.in_features}, out_features={self.out_features}, bias={self.has_bias})"
