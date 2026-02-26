@@ -215,7 +215,7 @@ See `example_config.ini` for a complete example.
 
 The framework uses a custom arena allocator with mmap-based memory allocation:
 
-```
+```c
 ┌─────────────────────────────────────┐
 │           Arena Header              │
 ├─────────────────────────────────────┤
@@ -229,7 +229,7 @@ The framework uses a custom arena allocator with mmap-based memory allocation:
 
 ### Tensor Structure
 
-```
+```asm
 Offset  Size   Field
 0       8      data pointer (32-byte aligned)
 8       4      ndim (number of dimensions)
@@ -243,6 +243,7 @@ Offset  Size   Field
 ### Calling Convention
 
 The framework follows the System V AMD64 ABI:
+
 - Arguments: RDI, RSI, RDX, RCX, R8, R9
 - Float arguments: XMM0-XMM7
 - Return value: RAX (integer), XMM0 (float)
@@ -260,6 +261,7 @@ Matrix operations use runtime-detected SIMD instructions for vectorization:
 - **Reductions**: Horizontal adds with SSE3 HADDPS
 
 CPU features are detected at runtime:
+
 ```bash
 ./neural_framework test  # Shows detected SIMD level
 ```
@@ -269,7 +271,7 @@ CPU features are detected at runtime:
 Example configurations are provided in the `configs/` directory:
 
 | Config | Description | Architecture |
-|--------|-------------|--------------|
+| -------- | ------------- | -------------- |
 | `xor_config.ini` | XOR learning | 2→8→1 |
 | `mnist_config.ini` | MNIST digits | 784→256→128→10 |
 | `sine_config.ini` | Sine regression | 1→32→32→1 |
@@ -278,6 +280,7 @@ Example configurations are provided in the `configs/` directory:
 | `wine_quality_config.ini` | UCI Wine Quality (real-world) | 11→64→32→6 |
 
 Generate synthetic datasets:
+
 ```bash
 python3 tools/gen_datasets.py
 ```
@@ -299,7 +302,7 @@ python3 tools/prepare_wine_quality.py
 ### Results
 
 | Metric | Value |
-|--------|-------|
+| -------- | ------- |
 | Parameters | 3,046 |
 | Final Train Loss | 0.94 |
 | Train Accuracy | ~60% |
@@ -319,7 +322,7 @@ This dataset provides a meaningful, non-trivial benchmark: the model learns real
 
 A minimal example training a network to learn XOR:
 
-```
+```asm
 Input: [0,0] -> Output: 0
 Input: [0,1] -> Output: 1
 Input: [1,0] -> Output: 1
@@ -327,6 +330,7 @@ Input: [1,1] -> Output: 0
 ```
 
 Configuration:
+
 ```ini
 [model]
 input_size = 2
@@ -346,7 +350,7 @@ momentum = 0.9
 
 ## File Structure
 
-```
+```asm
 Neural Assembly/
 ├── main.asm            # Entry point and CLI
 ├── mem.asm             # Memory management
@@ -398,11 +402,13 @@ Neural Assembly/
 ## Debugging
 
 Build with debug symbols:
+
 ```bash
 make debug
 ```
 
 Run with GDB:
+
 ```bash
 gdb ./neural_framework
 (gdb) break main
@@ -410,6 +416,7 @@ gdb ./neural_framework
 ```
 
 Useful GDB commands for assembly:
+
 ```gdb
 (gdb) info registers          # View all registers
 (gdb) p/f $xmm0              # Print XMM register as float
@@ -420,6 +427,7 @@ Useful GDB commands for assembly:
 ## Contributing
 
 This is an educational project demonstrating low-level ML implementation. Contributions for:
+
 - Bug fixes
 - Performance optimizations
 - Additional layer types
@@ -430,18 +438,21 @@ This is an educational project demonstrating low-level ML implementation. Contri
 Status of planned features (ordered by priority):
 
 ### High Priority — ✅ All Complete (v1.1)
+
 - ✅ **Confusion Matrix & Per-Class Metrics** — Precision, recall, F1-score per class; assembly-backed (`training_ops.asm`)
 - ✅ **Early Stopping** — Monitor validation loss, patience-based stopping (`pyneural/training.py`)
 - ✅ **Learning Rate Scheduling** — Step decay, exponential decay, cosine annealing, warmup, ReduceLROnPlateau; math in assembly
 - ✅ **NaN/Inf Detection** — Assembly `tensor_has_nan`/`tensor_has_inf` with parity-flag trick; Python `NaNDetector` wrapper
 
 ### Medium Priority — ✅ Complete
+
 - ✅ **Gradient Norm Logging** — SSE-vectorized L2 norm (`tensor_grad_l2_norm` in assembly)
 - ✅ **Weight Initialization Strategies** — He/Kaiming & Xavier/Glorot, uniform & normal variants (assembly `init_he_uniform` etc.)
 - ✅ **Dropout Regularization** — Inverted dropout forward/backward in assembly (`dropout_forward`/`dropout_backward`)
 - ✅ **Class-Balanced Sampling** — Assembly `compute_class_weights`/`compute_sample_weights`/`weighted_sample_indices`; Python `WeightedRandomSampler`
 
 ### Future — ✅ Complete
+
 - ✅ **Additional Datasets** — Iris (4→16→3, `prepare_iris.py`), CIFAR-10 (`prepare_cifar10.py`), Boston Housing (`prepare_boston.py`)
 - ✅ **TensorBoard-Compatible Logging** — C `tb_logger.c` writes TFEvent files; Python `SummaryWriter` wrapper
 - ✅ **Model Pruning** — C `pruning.c`: magnitude, top-k, structured row/column; Python `Pruner` class
