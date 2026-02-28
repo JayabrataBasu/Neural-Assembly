@@ -73,6 +73,8 @@ from .schedulers import (
     CosineAnnealingLR,
     WarmupLR,
     ReduceLROnPlateau,
+    OneCycleLR,
+    LRFinder,
 )
 from .training import Trainer, TrainerConfig, TrainingHistory, EarlyStopping, NaNDetector
 from .checkpoint import save_checkpoint, load_checkpoint
@@ -148,6 +150,8 @@ __all__ = [
     "CosineAnnealingLR",
     "WarmupLR",
     "ReduceLROnPlateau",
+    "OneCycleLR",
+    "LRFinder",
     # Training
     "Trainer",
     "TrainerConfig",
