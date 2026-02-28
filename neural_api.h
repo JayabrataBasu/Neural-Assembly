@@ -1121,6 +1121,62 @@ int  fuzzy_system_n_rules(const FuzzySystem *sys);
 int  fuzzy_system_resolution(const FuzzySystem *sys);
 int  fuzzy_system_defuzz_method(const FuzzySystem *sys);
 
+/* ── Conv2D Layer (conv2d.c) ─────────────────────────────────────── */
+
+typedef struct Conv2DLayer Conv2DLayer;
+
+/* Output dimension helper — no layer needed */
+int64_t conv2d_output_size(int64_t input_dim, int64_t kernel_dim,
+                           int64_t stride, int64_t padding);
+
+/* Lifecycle */
+Conv2DLayer *conv2d_layer_create(int64_t in_channels, int64_t out_channels,
+                                 int64_t kernel_h, int64_t kernel_w,
+                                 int64_t stride, int64_t padding,
+                                 int has_bias);
+void         conv2d_layer_free(Conv2DLayer *layer);
+
+/* Forward / backward */
+int  conv2d_layer_forward(Conv2DLayer *layer,
+                          const double *input, int64_t batch,
+                          int64_t in_h, int64_t in_w,
+                          double *output);
+int  conv2d_layer_backward(Conv2DLayer *layer,
+                           const double *input,
+                           const double *grad_output,
+                           int64_t batch, int64_t in_h, int64_t in_w,
+                           double *grad_input,
+                           double *grad_weight,
+                           double *grad_bias);
+
+/* Accessors */
+double *conv2d_layer_weight(Conv2DLayer *layer);
+double *conv2d_layer_bias(Conv2DLayer *layer);
+int64_t conv2d_layer_out_h(const Conv2DLayer *layer, int64_t in_h);
+int64_t conv2d_layer_out_w(const Conv2DLayer *layer, int64_t in_w);
+int64_t conv2d_layer_weight_size(const Conv2DLayer *layer);
+int64_t conv2d_layer_in_channels(const Conv2DLayer *layer);
+int64_t conv2d_layer_out_channels(const Conv2DLayer *layer);
+int64_t conv2d_layer_kernel_h(const Conv2DLayer *layer);
+int64_t conv2d_layer_kernel_w(const Conv2DLayer *layer);
+int64_t conv2d_layer_stride(const Conv2DLayer *layer);
+int64_t conv2d_layer_padding(const Conv2DLayer *layer);
+
+/* ── MaxPool2D (conv2d.c) ────────────────────────────────────────── */
+
+int  maxpool2d_forward(const double *input,
+                       int64_t batch, int64_t channels,
+                       int64_t in_h, int64_t in_w,
+                       int64_t pool_h, int64_t pool_w,
+                       int64_t stride, int64_t padding,
+                       double *output, int64_t *mask);
+int  maxpool2d_backward(const double *grad_output,
+                        const int64_t *mask,
+                        int64_t batch, int64_t channels,
+                        int64_t in_h, int64_t in_w,
+                        int64_t out_h, int64_t out_w,
+                        double *grad_input);
+
 #ifdef __cplusplus
 }
 #endif

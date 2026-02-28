@@ -1,12 +1,14 @@
-# Neural Assembly Framework
+# Neural Assembly Framework — v2.0.0
 
-A minimal deep learning framework implemented entirely in x86-64 assembly language.
+A deep learning framework with its core written in x86-64 assembly and C, plus thin Python bindings.
 
 ## Overview
 
-This project implements a complete neural network training framework in pure x86-64 assembly, targeting Linux with NASM assembler. It demonstrates that even low-level systems programming can be used for machine learning workloads.
+This project implements a complete neural network training framework in x86-64 assembly and C, targeting Linux with NASM assembler and GCC. The compute-heavy pieces (SIMD matmul, tensor ops, convolution, pooling, normalization, fuzzy logic) live in assembly and C; Python just marshals arguments and manages lifetimes. It demonstrates that even low-level systems programming can power real ML workloads.
 
 ## Features
+
+### Core (Assembly)
 
 - **Memory Management** (`mem.asm`)
   - Arena allocator for efficient memory management
@@ -33,16 +35,10 @@ This project implements a complete neural network training framework in pure x86
 
 - **Neural Network Layers** (`nn_layers.asm`)
   - Linear (fully connected)
-  - Conv2D (2D convolution)
-  - BatchNorm (batch normalization)
-  - Dropout
-  - MaxPool2D
+  - Dropout (inverted, with mask)
 
 - **Activation Functions** (`activations.asm`)
-  - ReLU
-  - Sigmoid
-  - Tanh
-  - Softmax
+  - ReLU, Sigmoid, Tanh, Softmax
 
 - **Loss Functions** (`losses.asm`)
   - Mean Squared Error (MSE)
@@ -55,61 +51,80 @@ This project implements a complete neural network training framework in pure x86
   - Runtime learning rate get/set
   - Optimizer state save/load
 
-- **Training Ops** (`training_ops.asm`) — *NEW in v1.1*
-  - Confusion matrix update & per-class precision/recall/F1 (assembly)
-  - LR schedules: step decay, exponential decay, cosine annealing (assembly)
-  - NaN/Inf detection on float32 tensors (assembly, parity-flag trick)
+- **Training Ops** (`training_ops.asm`)
+  - Confusion matrix update & per-class precision/recall/F1
+  - LR schedules: step decay, exponential decay, cosine annealing
+  - NaN/Inf detection on float32 tensors (parity-flag trick)
   - Gradient L2 norm (SSE-vectorized sum-of-squares + sqrtss)
-  - Dropout forward/backward (inverted, with mask) (assembly)
-  - Weight initialization: He/Kaiming, Xavier/Glorot uniform & normal (assembly)
+  - Dropout forward/backward (inverted, with mask)
+  - Weight initialization: He/Kaiming, Xavier/Glorot uniform & normal
 
-- **TensorBoard Logging** (`tb_logger.c`) — *NEW in v1.2*
-  - TFRecord/TFEvent file writer (CRC32C, protobuf encoding in C)
+- **Data Loading** (`dataset.asm`) — CSV parsing, mini-batch loading, Fisher-Yates shuffling
+- **Model I/O** (`model_io.asm`) — Binary serialization, checkpoint save/restore, optimizer state persistence
+- **Configuration** (`config_parser.asm`) — INI-style parsing for hyperparameters and architecture
+- **Error Handling** (`error.asm`) — 19 error codes, tensor validation, NaN detection, null-pointer checks
+- **Testing** (`tests.asm`) — Unit tests for all components, numerical gradient checking
+- **Multi-threading** (`threads.asm`) — pthreads pool, work queue, parallel for, CPU core detection
+
+### C Modules
+
+- **Conv2D & MaxPool2D** (`conv2d.c`) — *NEW in v2.0*
+  - Im2col + GEMM convolution (forward + backward)
+  - Kaiming uniform weight initialization
+  - MaxPool2D with argmax mask for backward routing
+  - NCHW layout, float64, full gradient computation (input, weight, bias)
+
+- **BatchNorm1d & LayerNorm** (`batchnorm.c`)
+  - BatchNorm1d: running-mean/var EMA, train vs eval modes, full backward
+  - LayerNorm: per-sample normalization, no running stats
+
+- **Label-Smoothed CE & ROC-AUC** (`metrics_losses.c`)
+  - Numerically stable log-softmax + smoothed targets
+  - ROC-AUC via trapezoidal integration on sorted FPR/TPR curve
+
+- **Data Transforms** (`transforms.c`)
+  - Per-feature z-score normalization (forward + inverse)
+  - Min-max scaling to [0, 1]
+  - Statistics computation (mean, std, min, max) in one pass
+
+- **Embedding Layer** (`embedding.c`)
+  - Row-lookup forward, gradient-accumulation backward
+  - Xavier-uniform init, index-range validation
+
+- **Fuzzy Logic Inference Engine** (`fuzzy.c`)
+  - Membership functions: triangular, trapezoidal, gaussian
+  - Operators: AND (min), OR (max), NOT (complement)
+  - Defuzzification: centroid, bisector, mean-of-maximum
+  - Mamdani rule engine (up to 256 rules, 16 antecedents)
+
+- **TensorBoard Logging** (`tb_logger.c`)
+  - TFRecord/TFEvent file writer (CRC32C, protobuf encoding)
   - Scalar, multi-scalar, and histogram-stats logging
-  - Compatible with `tensorboard --logdir`
 
-- **Model Pruning** (`pruning.c`) — *NEW in v1.2*
+- **Model Pruning** (`pruning.c`)
   - Unstructured magnitude pruning (threshold & top-k)
   - Structured row/column pruning (L2 norm)
   - Sparsity analysis, mask reapply, threshold search
 
-- **INT8 Quantization** (`quantize.c`) — *NEW in v1.2*
+- **INT8 Quantization** (`quantize.c`)
   - Symmetric & affine (asymmetric) quantization
   - MinMax and percentile calibration
   - Quantized int8 matrix multiply (int32 accumulation)
-  - Error analysis: MSE and SNR metrics
 
-- **Data Loading** (`dataset.asm`)
-  - CSV file parsing
-  - Mini-batch loading
-  - Dataset shuffling (Fisher-Yates)
+### Python Layer (`pyneural/`)
 
-- **Model I/O** (`model_io.asm`)
-  - Binary model serialization
-  - Checkpoint save/restore
-  - Optimizer state persistence
+Thin wrappers that marshal arguments to C/assembly — all heavy math stays below.
 
-- **Configuration** (`config_parser.asm`)
-  - INI-style configuration parsing
-  - Training hyperparameters
-  - Model architecture specification
-
-- **Error Handling** (`error.asm`)
-  - Comprehensive error codes (19 error types)
-  - User-friendly error messages
-  - Tensor validation (NaN detection, shape checking)
-  - Null pointer checks
-
-- **Testing Framework** (`tests.asm`)
-  - Unit tests for all components
-  - Numerical gradient checking (central differences)
-  - Gradient verification for autograd
-
-- **Multi-threading** (`threads.asm`)
-  - pthreads-based thread pool
-  - Work queue with condition variables
-  - Parallel for loops
-  - Automatic CPU core detection
+- **Layers**: Linear, Conv2D, MaxPool2D, BatchNorm1d, LayerNorm, Embedding, Dropout
+- **Activations**: ReLU, Sigmoid, Tanh, Softmax
+- **Losses**: MSELoss, CrossEntropyLoss, LabelSmoothingCrossEntropy
+- **Optimizers**: SGD, Adam, AdamW (with gradient clipping)
+- **Schedulers**: OneCycleLR (warmup + cosine annealing), LRFinder (exponential sweep)
+- **Checkpoint**: save/load full model state (epoch, loss, LR, all parameters)
+- **Metrics**: ROC-AUC score, confusion matrix, precision/recall/F1
+- **Transforms**: Normalize (z-score), MinMaxScale, Compose pipelines
+- **Fuzzy Logic**: FuzzySystem class + standalone membership / defuzzification helpers
+- **Utilities**: TensorBoard SummaryWriter, Pruner, Quantizer, NaNDetector, EarlyStopping
 
 ## Requirements
 
@@ -350,10 +365,10 @@ momentum = 0.9
 
 ## File Structure
 
-```asm
+```
 Neural Assembly/
 ├── main.asm            # Entry point and CLI
-├── mem.asm             # Memory management
+├── mem.asm             # Memory management (arena allocator)
 ├── utils.asm           # Utility functions
 ├── error.asm           # Error handling system
 ├── simd.asm            # SIMD detection and optimized kernels
@@ -361,35 +376,82 @@ Neural Assembly/
 ├── math_kernels.asm    # SIMD math operations
 ├── autograd.asm        # Automatic differentiation
 ├── activations.asm     # Activation functions
-├── nn_layers.asm       # Neural network layers
+├── nn_layers.asm       # Neural network layers (Linear, Dropout)
 ├── losses.asm          # Loss functions
 ├── optimizers.asm      # Optimization algorithms
 ├── dataset.asm         # Data loading
 ├── model_io.asm        # Model serialization
 ├── config_parser.asm   # Configuration parsing
 ├── threads.asm         # Multi-threading support
+├── training_ops.asm    # LR schedules, metrics, weight init
 ├── tests.asm           # Unit tests and gradient checking
 ├── compat.asm          # C library compatibility
-├── Makefile            # Build system
-├── example_config.ini  # Example configuration
-├── configs/            # More example configurations
+├── verify.asm          # Symbol verification
+│
+├── conv2d.c            # Conv2D + MaxPool2D (im2col/GEMM)
+├── batchnorm.c         # BatchNorm1d + LayerNorm
+├── metrics_losses.c    # Label-smoothed CE + ROC-AUC
+├── transforms.c        # Data normalization / scaling
+├── embedding.c         # Embedding layer (lookup + backward)
+├── fuzzy.c             # Fuzzy logic inference engine
+├── tb_logger.c         # TensorBoard TFEvent logging
+├── pruning.c           # Model pruning (magnitude, structured)
+├── quantize.c          # INT8 quantization
+│
+├── neural_api.h        # Public C header for all exports
+├── Makefile            # Build system (asm + C → libneural.so)
+│
+├── pyneural/           # Python wrappers (thin ctypes layer)
+│   ├── __init__.py     # Public API + version
+│   ├── core.py         # ctypes bindings to libneural.so
+│   ├── tensor.py       # Tensor class
+│   ├── nn.py           # Linear, activations, losses, Embedding, norms
+│   ├── conv.py         # Conv2D, MaxPool2D
+│   ├── optim.py        # SGD, Adam, AdamW
+│   ├── autograd.py     # Autograd wrapper
+│   ├── dataset.py      # DataLoader
+│   ├── config.py       # Config parser
+│   ├── schedulers.py   # OneCycleLR, LRFinder
+│   ├── fuzzy.py        # FuzzySystem + helpers
+│   ├── transforms.py   # Normalize, MinMaxScale, Compose
+│   ├── checkpoint.py   # Checkpoint save/load
+│   ├── metrics.py      # ROC-AUC
+│   ├── tb_logger.py    # SummaryWriter
+│   ├── pruning.py      # Pruner
+│   └── quantize.py     # Quantizer
+│
+├── tools/              # Test suites, data generators, utilities
+│   ├── run_validation_suite.py
+│   ├── test_conv2d.py        # 83 tests
+│   ├── test_fuzzy.py         # 65 tests
+│   ├── test_lr_finder.py     # 39 tests
+│   ├── test_transforms.py    # 37 tests
+│   ├── test_onecycle.py      # 35 tests
+│   ├── test_train_eval_mode.py # 26 tests
+│   ├── test_batchnorm.py     # 22 tests
+│   ├── test_embedding.py     # 19 tests
+│   ├── test_label_smoothing.py # 17 tests
+│   ├── test_layernorm.py     # 16 tests
+│   ├── test_roc_auc.py       # 16 tests
+│   ├── test_checkpoint.py    # 14 tests
+│   ├── test_dropout.py       # 13 tests
+│   ├── test_autograd.py      #  — autograd integration
+│   ├── test_dataloader.py    #  — dataloader integration
+│   ├── gen_synth.py          # Synthetic data generator
+│   └── gen_datasets.py       # Dataset generator for examples
+│
+├── configs/            # Example configurations
 │   ├── xor_config.ini
 │   ├── mnist_config.ini
 │   ├── sine_config.ini
-│   ├── wine_quality_config.ini
 │   └── ...
-├── tools/
-│   ├── gen_synth.py    # Synthetic data generator
-│   ├── gen_datasets.py # Dataset generator for examples
-│   ├── prepare_wine_quality.py  # UCI Wine Quality downloader
-│   └── run_validation_suite.py  # Validation runner
 ├── csv/                # Training data
 └── README.md           # This file
 ```
 
 ## Limitations
 
-- Single-precision (float32) only
+- Assembly core uses single-precision (float32); C modules use double (float64)
 - Maximum 4 tensor dimensions
 - No GPU support (CPU SIMD only)
 
@@ -433,30 +495,51 @@ This is an educational project demonstrating low-level ML implementation. Contri
 - Additional layer types
 - Better documentation
 
-## Feature Roadmap
+## Feature Roadmap — All Complete as of v2.0.0
 
-Status of planned features (ordered by priority):
+Every feature below has a dedicated test suite and passes the full 23-check validation.
 
-### High Priority — ✅ All Complete (v1.1)
+### Core Infrastructure (v1.0)
+- ✅ **Confusion Matrix & Per-Class Metrics** — Precision, recall, F1 per class (assembly)
+- ✅ **Early Stopping** — Patience-based validation loss monitoring
+- ✅ **LR Scheduling** — Step decay, exponential decay, cosine annealing, warmup, ReduceLROnPlateau
+- ✅ **NaN/Inf Detection** — Assembly `tensor_has_nan`/`tensor_has_inf` with parity-flag trick
+- ✅ **Gradient Norm Logging** — SSE-vectorized L2 norm
+- ✅ **Weight Initialization** — He/Kaiming & Xavier/Glorot, uniform & normal
+- ✅ **Dropout Regularization** — Inverted dropout forward/backward (assembly)
+- ✅ **Class-Balanced Sampling** — `WeightedRandomSampler` backed by assembly
 
-- ✅ **Confusion Matrix & Per-Class Metrics** — Precision, recall, F1-score per class; assembly-backed (`training_ops.asm`)
-- ✅ **Early Stopping** — Monitor validation loss, patience-based stopping (`pyneural/training.py`)
-- ✅ **Learning Rate Scheduling** — Step decay, exponential decay, cosine annealing, warmup, ReduceLROnPlateau; math in assembly
-- ✅ **NaN/Inf Detection** — Assembly `tensor_has_nan`/`tensor_has_inf` with parity-flag trick; Python `NaNDetector` wrapper
+### Extended Modules (v1.1–v1.2)
+- ✅ **TensorBoard Logging** — C TFEvent writer + Python `SummaryWriter`
+- ✅ **Model Pruning** — Magnitude, top-k, structured row/column (C + Python)
+- ✅ **INT8 Quantization** — Symmetric/affine, calibration, quantized matmul (C + Python)
+- ✅ **Dropout Wrapper** — Python `Dropout` class with train/eval mode (13 tests)
+- ✅ **Gradient Clipping** — Assembly-backed `clip_grad_norm` wired into Trainer (6 tests)
+- ✅ **Train/Eval Mode** — Module base class propagating to children (26 tests)
+- ✅ **Checkpoint Save/Resume** — Binary format v1 with metadata (14 tests)
 
-### Medium Priority — ✅ Complete
+### Normalization & Losses (v1.2)
+- ✅ **BatchNorm1d** — Running-mean EMA, train/eval modes, full backward (C, 22 tests)
+- ✅ **LayerNorm** — Per-sample normalization, no running stats (C, 16 tests)
+- ✅ **Label Smoothing** — Numerically stable log-softmax + smoothed targets (C, 17 tests)
+- ✅ **ROC-AUC** — Trapezoidal integration on sorted FPR/TPR curve (C, 16 tests)
 
-- ✅ **Gradient Norm Logging** — SSE-vectorized L2 norm (`tensor_grad_l2_norm` in assembly)
-- ✅ **Weight Initialization Strategies** — He/Kaiming & Xavier/Glorot, uniform & normal variants (assembly `init_he_uniform` etc.)
-- ✅ **Dropout Regularization** — Inverted dropout forward/backward in assembly (`dropout_forward`/`dropout_backward`)
-- ✅ **Class-Balanced Sampling** — Assembly `compute_class_weights`/`compute_sample_weights`/`weighted_sample_indices`; Python `WeightedRandomSampler`
+### Data & Embeddings (v1.2)
+- ✅ **Data Transforms** — Z-score, min-max, Compose pipeline (C, 37 tests)
+- ✅ **Embedding Layer** — Row lookup + gradient accumulation backward (C, 19 tests)
 
-### Future — ✅ Complete
+### Schedulers & Diagnostics (v1.2)
+- ✅ **OneCycleLR** — Linear warmup + cosine annealing, per-step (35 tests)
+- ✅ **LRFinder** — Exponential sweep, EMA smoothing, auto-suggestion (39 tests)
 
-- ✅ **Additional Datasets** — Iris (4→16→3, `prepare_iris.py`), CIFAR-10 (`prepare_cifar10.py`), Boston Housing (`prepare_boston.py`)
-- ✅ **TensorBoard-Compatible Logging** — C `tb_logger.c` writes TFEvent files; Python `SummaryWriter` wrapper
-- ✅ **Model Pruning** — C `pruning.c`: magnitude, top-k, structured row/column; Python `Pruner` class
-- ✅ **Quantization** — C `quantize.c`: INT8 affine/symmetric, calibration, quantized matmul; Python `Quantizer` class
+### Fuzzy Logic (v1.2)
+- ✅ **Fuzzy Inference Engine** — Mamdani rule engine, 3 MF types, 3 defuzz methods (C, 65 tests)
+
+### Convolution & Pooling (v2.0)
+- ✅ **Conv2D** — Im2col + GEMM forward/backward, Kaiming init, bias support (C, 83 tests combined)
+- ✅ **MaxPool2D** — Argmax-mask forward + scatter backward (C)
+
+**Total test count: 408 across 14 dedicated test suites, plus validation and integration tests.**
 
 ## License
 

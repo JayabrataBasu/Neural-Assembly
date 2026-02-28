@@ -88,6 +88,7 @@ from .fuzzy import (
     fuzzy_and, fuzzy_or, fuzzy_not,
     defuzz_centroid, defuzz_bisector, defuzz_mom,
 )
+from .conv import Conv2D, MaxPool2D, calc_output_size
 
 import importlib as _importlib
 weight_init = _importlib.import_module('.init', __name__)
@@ -95,7 +96,7 @@ weight_init = _importlib.import_module('.init', __name__)
 # Re-import core.init to ensure pn.init() is the framework initializer
 from .core import init
 
-__version__ = "1.2.0"
+__version__ = "2.0.0"
 __all__ = [
     # Core
     "init",
@@ -196,4 +197,8 @@ __all__ = [
     "defuzz_centroid",
     "defuzz_bisector",
     "defuzz_mom",
+    # Convolution / Pooling
+    "Conv2D",
+    "MaxPool2D",
+    "calc_output_size",
 ]

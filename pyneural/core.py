@@ -965,6 +965,116 @@ _lib.fuzzy_system_resolution.argtypes = [ctypes.c_void_p]
 _lib.fuzzy_system_defuzz_method.restype = ctypes.c_int
 _lib.fuzzy_system_defuzz_method.argtypes = [ctypes.c_void_p]
 
+# ── Conv2D Layer (conv2d.c) ───────────────────────────────────────
+
+_lib.conv2d_output_size.restype = ctypes.c_int64
+_lib.conv2d_output_size.argtypes = [
+    ctypes.c_int64,  # input_dim
+    ctypes.c_int64,  # kernel_dim
+    ctypes.c_int64,  # stride
+    ctypes.c_int64,  # padding
+]
+
+_lib.conv2d_layer_create.restype = ctypes.c_void_p
+_lib.conv2d_layer_create.argtypes = [
+    ctypes.c_int64,  # in_channels
+    ctypes.c_int64,  # out_channels
+    ctypes.c_int64,  # kernel_h
+    ctypes.c_int64,  # kernel_w
+    ctypes.c_int64,  # stride
+    ctypes.c_int64,  # padding
+    ctypes.c_int,    # has_bias
+]
+
+_lib.conv2d_layer_free.restype = None
+_lib.conv2d_layer_free.argtypes = [ctypes.c_void_p]
+
+_lib.conv2d_layer_forward.restype = ctypes.c_int
+_lib.conv2d_layer_forward.argtypes = [
+    ctypes.c_void_p,  # Conv2DLayer*
+    ctypes.c_void_p,  # const double* input
+    ctypes.c_int64,   # batch
+    ctypes.c_int64,   # in_h
+    ctypes.c_int64,   # in_w
+    ctypes.c_void_p,  # double* output
+]
+
+_lib.conv2d_layer_backward.restype = ctypes.c_int
+_lib.conv2d_layer_backward.argtypes = [
+    ctypes.c_void_p,  # Conv2DLayer*
+    ctypes.c_void_p,  # const double* input
+    ctypes.c_void_p,  # const double* grad_output
+    ctypes.c_int64,   # batch
+    ctypes.c_int64,   # in_h
+    ctypes.c_int64,   # in_w
+    ctypes.c_void_p,  # double* grad_input
+    ctypes.c_void_p,  # double* grad_weight
+    ctypes.c_void_p,  # double* grad_bias
+]
+
+_lib.conv2d_layer_weight.restype = ctypes.c_void_p
+_lib.conv2d_layer_weight.argtypes = [ctypes.c_void_p]
+
+_lib.conv2d_layer_bias.restype = ctypes.c_void_p
+_lib.conv2d_layer_bias.argtypes = [ctypes.c_void_p]
+
+_lib.conv2d_layer_out_h.restype = ctypes.c_int64
+_lib.conv2d_layer_out_h.argtypes = [ctypes.c_void_p, ctypes.c_int64]
+
+_lib.conv2d_layer_out_w.restype = ctypes.c_int64
+_lib.conv2d_layer_out_w.argtypes = [ctypes.c_void_p, ctypes.c_int64]
+
+_lib.conv2d_layer_weight_size.restype = ctypes.c_int64
+_lib.conv2d_layer_weight_size.argtypes = [ctypes.c_void_p]
+
+_lib.conv2d_layer_in_channels.restype = ctypes.c_int64
+_lib.conv2d_layer_in_channels.argtypes = [ctypes.c_void_p]
+
+_lib.conv2d_layer_out_channels.restype = ctypes.c_int64
+_lib.conv2d_layer_out_channels.argtypes = [ctypes.c_void_p]
+
+_lib.conv2d_layer_kernel_h.restype = ctypes.c_int64
+_lib.conv2d_layer_kernel_h.argtypes = [ctypes.c_void_p]
+
+_lib.conv2d_layer_kernel_w.restype = ctypes.c_int64
+_lib.conv2d_layer_kernel_w.argtypes = [ctypes.c_void_p]
+
+_lib.conv2d_layer_stride.restype = ctypes.c_int64
+_lib.conv2d_layer_stride.argtypes = [ctypes.c_void_p]
+
+_lib.conv2d_layer_padding.restype = ctypes.c_int64
+_lib.conv2d_layer_padding.argtypes = [ctypes.c_void_p]
+
+# ── MaxPool2D (conv2d.c) ─────────────────────────────────────────
+
+_lib.maxpool2d_forward.restype = ctypes.c_int
+_lib.maxpool2d_forward.argtypes = [
+    ctypes.c_void_p,  # const double* input
+    ctypes.c_int64,   # batch
+    ctypes.c_int64,   # channels
+    ctypes.c_int64,   # in_h
+    ctypes.c_int64,   # in_w
+    ctypes.c_int64,   # pool_h
+    ctypes.c_int64,   # pool_w
+    ctypes.c_int64,   # stride
+    ctypes.c_int64,   # padding
+    ctypes.c_void_p,  # double* output
+    ctypes.c_void_p,  # int64_t* mask
+]
+
+_lib.maxpool2d_backward.restype = ctypes.c_int
+_lib.maxpool2d_backward.argtypes = [
+    ctypes.c_void_p,  # const double* grad_output
+    ctypes.c_void_p,  # const int64_t* mask
+    ctypes.c_int64,   # batch
+    ctypes.c_int64,   # channels
+    ctypes.c_int64,   # in_h
+    ctypes.c_int64,   # in_w
+    ctypes.c_int64,   # out_h
+    ctypes.c_int64,   # out_w
+    ctypes.c_void_p,  # double* grad_input
+]
+
 
 def _check_error(result: int, operation: str = "operation"):
     """Check result code and raise exception if error."""
