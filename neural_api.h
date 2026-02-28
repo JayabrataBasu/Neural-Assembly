@@ -1075,6 +1075,52 @@ double     *embedding_weight(Embedding *emb);
 int64_t     embedding_num_embeddings(Embedding *emb);
 int64_t     embedding_dim(Embedding *emb);
 
+/* ── Fuzzy Logic Engine (fuzzy.c) ────────────────────────────────── */
+
+/* Membership functions — return mu in [0, 1] */
+double fuzzy_triangular(double x, double a, double b, double c);
+double fuzzy_trapezoidal(double x, double a, double b, double c, double d);
+double fuzzy_gaussian(double x, double mean, double sigma);
+
+/* Fuzzy operators */
+double fuzzy_and(double a, double b);
+double fuzzy_or(double a, double b);
+double fuzzy_not(double a);
+
+/* Defuzzification — operate on sampled output arrays */
+double fuzzy_defuzz_centroid(const double *values, const double *memberships,
+                             int64_t n);
+double fuzzy_defuzz_bisector(const double *values, const double *memberships,
+                             int64_t n);
+double fuzzy_defuzz_mom(const double *values, const double *memberships,
+                        int64_t n);
+
+/* Fuzzy inference system (Mamdani-style) */
+typedef struct FuzzySystem FuzzySystem;
+
+FuzzySystem *fuzzy_system_create(int n_inputs, int resolution,
+                                 int defuzz_method);
+void         fuzzy_system_free(FuzzySystem *sys);
+
+int  fuzzy_system_set_input_range(FuzzySystem *sys, int var_idx,
+                                  double lo, double hi);
+int  fuzzy_system_set_output_range(FuzzySystem *sys, double lo, double hi);
+int  fuzzy_system_add_input_mf(FuzzySystem *sys, int var_idx, int mf_type,
+                               double p0, double p1, double p2, double p3);
+int  fuzzy_system_add_output_mf(FuzzySystem *sys, int mf_type,
+                                double p0, double p1, double p2, double p3);
+int  fuzzy_system_add_rule(FuzzySystem *sys,
+                           const int *input_vars, const int *input_terms,
+                           int n_antecedents, int consequent_term,
+                           double weight);
+int  fuzzy_system_evaluate(const FuzzySystem *sys, const double *inputs,
+                           double *output);
+
+int  fuzzy_system_n_inputs(const FuzzySystem *sys);
+int  fuzzy_system_n_rules(const FuzzySystem *sys);
+int  fuzzy_system_resolution(const FuzzySystem *sys);
+int  fuzzy_system_defuzz_method(const FuzzySystem *sys);
+
 #ifdef __cplusplus
 }
 #endif

@@ -828,6 +828,143 @@ _lib.embedding_num_embeddings.argtypes = [ctypes.c_void_p]
 _lib.embedding_dim.restype = ctypes.c_int64
 _lib.embedding_dim.argtypes = [ctypes.c_void_p]
 
+# ── Fuzzy Logic Engine (fuzzy.c) ──────────────────────────────────
+
+# Membership functions
+_lib.fuzzy_triangular.restype = ctypes.c_double
+_lib.fuzzy_triangular.argtypes = [
+    ctypes.c_double,  # x
+    ctypes.c_double,  # a
+    ctypes.c_double,  # b
+    ctypes.c_double,  # c
+]
+
+_lib.fuzzy_trapezoidal.restype = ctypes.c_double
+_lib.fuzzy_trapezoidal.argtypes = [
+    ctypes.c_double,  # x
+    ctypes.c_double,  # a
+    ctypes.c_double,  # b
+    ctypes.c_double,  # c
+    ctypes.c_double,  # d
+]
+
+_lib.fuzzy_gaussian.restype = ctypes.c_double
+_lib.fuzzy_gaussian.argtypes = [
+    ctypes.c_double,  # x
+    ctypes.c_double,  # mean
+    ctypes.c_double,  # sigma
+]
+
+# Fuzzy operators
+_lib.fuzzy_and.restype = ctypes.c_double
+_lib.fuzzy_and.argtypes = [ctypes.c_double, ctypes.c_double]
+
+_lib.fuzzy_or.restype = ctypes.c_double
+_lib.fuzzy_or.argtypes = [ctypes.c_double, ctypes.c_double]
+
+_lib.fuzzy_not.restype = ctypes.c_double
+_lib.fuzzy_not.argtypes = [ctypes.c_double]
+
+# Defuzzification
+_lib.fuzzy_defuzz_centroid.restype = ctypes.c_double
+_lib.fuzzy_defuzz_centroid.argtypes = [
+    ctypes.c_void_p,  # const double* values
+    ctypes.c_void_p,  # const double* memberships
+    ctypes.c_int64,   # n
+]
+
+_lib.fuzzy_defuzz_bisector.restype = ctypes.c_double
+_lib.fuzzy_defuzz_bisector.argtypes = [
+    ctypes.c_void_p,  # const double* values
+    ctypes.c_void_p,  # const double* memberships
+    ctypes.c_int64,   # n
+]
+
+_lib.fuzzy_defuzz_mom.restype = ctypes.c_double
+_lib.fuzzy_defuzz_mom.argtypes = [
+    ctypes.c_void_p,  # const double* values
+    ctypes.c_void_p,  # const double* memberships
+    ctypes.c_int64,   # n
+]
+
+# Fuzzy system lifecycle
+_lib.fuzzy_system_create.restype = ctypes.c_void_p
+_lib.fuzzy_system_create.argtypes = [
+    ctypes.c_int,  # n_inputs
+    ctypes.c_int,  # resolution
+    ctypes.c_int,  # defuzz_method
+]
+
+_lib.fuzzy_system_free.restype = None
+_lib.fuzzy_system_free.argtypes = [ctypes.c_void_p]
+
+# System configuration
+_lib.fuzzy_system_set_input_range.restype = ctypes.c_int
+_lib.fuzzy_system_set_input_range.argtypes = [
+    ctypes.c_void_p,  # FuzzySystem*
+    ctypes.c_int,     # var_idx
+    ctypes.c_double,  # lo
+    ctypes.c_double,  # hi
+]
+
+_lib.fuzzy_system_set_output_range.restype = ctypes.c_int
+_lib.fuzzy_system_set_output_range.argtypes = [
+    ctypes.c_void_p,  # FuzzySystem*
+    ctypes.c_double,  # lo
+    ctypes.c_double,  # hi
+]
+
+_lib.fuzzy_system_add_input_mf.restype = ctypes.c_int
+_lib.fuzzy_system_add_input_mf.argtypes = [
+    ctypes.c_void_p,  # FuzzySystem*
+    ctypes.c_int,     # var_idx
+    ctypes.c_int,     # mf_type (0=tri, 1=trap, 2=gauss)
+    ctypes.c_double,  # p0
+    ctypes.c_double,  # p1
+    ctypes.c_double,  # p2
+    ctypes.c_double,  # p3
+]
+
+_lib.fuzzy_system_add_output_mf.restype = ctypes.c_int
+_lib.fuzzy_system_add_output_mf.argtypes = [
+    ctypes.c_void_p,  # FuzzySystem*
+    ctypes.c_int,     # mf_type
+    ctypes.c_double,  # p0
+    ctypes.c_double,  # p1
+    ctypes.c_double,  # p2
+    ctypes.c_double,  # p3
+]
+
+_lib.fuzzy_system_add_rule.restype = ctypes.c_int
+_lib.fuzzy_system_add_rule.argtypes = [
+    ctypes.c_void_p,  # FuzzySystem*
+    ctypes.c_void_p,  # const int* input_vars
+    ctypes.c_void_p,  # const int* input_terms
+    ctypes.c_int,     # n_antecedents
+    ctypes.c_int,     # consequent_term
+    ctypes.c_double,  # weight
+]
+
+_lib.fuzzy_system_evaluate.restype = ctypes.c_int
+_lib.fuzzy_system_evaluate.argtypes = [
+    ctypes.c_void_p,  # const FuzzySystem*
+    ctypes.c_void_p,  # const double* inputs
+    ctypes.c_void_p,  # double* output
+]
+
+# System accessors
+_lib.fuzzy_system_n_inputs.restype = ctypes.c_int
+_lib.fuzzy_system_n_inputs.argtypes = [ctypes.c_void_p]
+
+_lib.fuzzy_system_n_rules.restype = ctypes.c_int
+_lib.fuzzy_system_n_rules.argtypes = [ctypes.c_void_p]
+
+_lib.fuzzy_system_resolution.restype = ctypes.c_int
+_lib.fuzzy_system_resolution.argtypes = [ctypes.c_void_p]
+
+_lib.fuzzy_system_defuzz_method.restype = ctypes.c_int
+_lib.fuzzy_system_defuzz_method.argtypes = [ctypes.c_void_p]
+
 
 def _check_error(result: int, operation: str = "operation"):
     """Check result code and raise exception if error."""

@@ -82,6 +82,12 @@ from .tb_logger import SummaryWriter
 from .pruning import Pruner, prune_magnitude, prune_rows, prune_cols
 from .quantize import Quantizer, QuantParams, quantized_matmul
 from .transforms import Normalize, MinMaxScale, Compose, compute_stats
+from .fuzzy import (
+    FuzzySystem,
+    triangular, trapezoidal, gaussian,
+    fuzzy_and, fuzzy_or, fuzzy_not,
+    defuzz_centroid, defuzz_bisector, defuzz_mom,
+)
 
 import importlib as _importlib
 weight_init = _importlib.import_module('.init', __name__)
@@ -179,4 +185,15 @@ __all__ = [
     "MinMaxScale",
     "Compose",
     "compute_stats",
+    # Fuzzy Logic
+    "FuzzySystem",
+    "triangular",
+    "trapezoidal",
+    "gaussian",
+    "fuzzy_and",
+    "fuzzy_or",
+    "fuzzy_not",
+    "defuzz_centroid",
+    "defuzz_bisector",
+    "defuzz_mom",
 ]

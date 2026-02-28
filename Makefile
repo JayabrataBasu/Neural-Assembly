@@ -51,7 +51,8 @@ C_SRCS = tb_logger.c \
          batchnorm.c \
          metrics_losses.c \
          transforms.c \
-         embedding.c
+         embedding.c \
+         fuzzy.c
 
 # Library assembly sources (excluding main.asm for shared library)
 LIB_ASM_SRCS = mem.asm \
