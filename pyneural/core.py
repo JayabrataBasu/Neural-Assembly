@@ -720,6 +720,36 @@ _lib.layernorm_beta.argtypes = [ctypes.c_void_p]
 _lib.layernorm_num_features.restype = ctypes.c_int64
 _lib.layernorm_num_features.argtypes = [ctypes.c_void_p]
 
+# ── Label-Smoothed Cross-Entropy (metrics_losses.c) ───────────────
+_lib.label_smoothing_ce_forward.restype = ctypes.c_int
+_lib.label_smoothing_ce_forward.argtypes = [
+    ctypes.c_void_p,   # const double* logits
+    ctypes.c_void_p,   # const int64_t* targets
+    ctypes.c_int64,    # batch_size
+    ctypes.c_int64,    # num_classes
+    ctypes.c_double,   # smoothing
+    ctypes.POINTER(ctypes.c_double),  # loss_out
+]
+
+_lib.label_smoothing_ce_backward.restype = ctypes.c_int
+_lib.label_smoothing_ce_backward.argtypes = [
+    ctypes.c_void_p,   # const double* logits
+    ctypes.c_void_p,   # const int64_t* targets
+    ctypes.c_int64,    # batch_size
+    ctypes.c_int64,    # num_classes
+    ctypes.c_double,   # smoothing
+    ctypes.c_void_p,   # double* grad_out
+]
+
+# ── ROC-AUC Score (metrics_losses.c) ──────────────────────────────
+_lib.roc_auc_score.restype = ctypes.c_int
+_lib.roc_auc_score.argtypes = [
+    ctypes.c_void_p,   # const double* y_true
+    ctypes.c_void_p,   # const double* y_score
+    ctypes.c_int64,    # n
+    ctypes.POINTER(ctypes.c_double),  # auc_out
+]
+
 
 def _check_error(result: int, operation: str = "operation"):
     """Check result code and raise exception if error."""

@@ -30,7 +30,7 @@ from .tensor import Tensor
 from .nn import (
     Linear, ReLU, Sigmoid, Softmax, Dropout, Sequential,
     BatchNorm1d, LayerNorm,
-    MSELoss, CrossEntropyLoss,
+    MSELoss, CrossEntropyLoss, LabelSmoothingCrossEntropy,
 )
 from .optim import SGD, Adam
 from .autograd import (
@@ -66,7 +66,7 @@ from .dataset import (
 from .config import Config
 
 # New modules
-from .metrics import ConfusionMatrix, compute_accuracy, top_k_accuracy
+from .metrics import ConfusionMatrix, compute_accuracy, top_k_accuracy, roc_auc_score
 from .schedulers import (
     StepLR,
     ExponentialLR,
@@ -112,6 +112,7 @@ __all__ = [
     # Loss Functions
     "MSELoss",
     "CrossEntropyLoss",
+    "LabelSmoothingCrossEntropy",
     # Optimizers
     "SGD",
     "Adam",
@@ -138,6 +139,7 @@ __all__ = [
     "ConfusionMatrix",
     "compute_accuracy",
     "top_k_accuracy",
+    "roc_auc_score",
     # Schedulers
     "StepLR",
     "ExponentialLR",

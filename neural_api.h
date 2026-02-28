@@ -1031,6 +1031,20 @@ double      *layernorm_gamma(LayerNorm *ln);
 double      *layernorm_beta(LayerNorm *ln);
 int64_t      layernorm_num_features(LayerNorm *ln);
 
+/* ── Label-Smoothed Cross-Entropy (metrics_losses.c) ──────────────── */
+
+int label_smoothing_ce_forward(const double *logits, const int64_t *targets,
+                               int64_t batch_size, int64_t num_classes,
+                               double smoothing, double *loss_out);
+int label_smoothing_ce_backward(const double *logits, const int64_t *targets,
+                                int64_t batch_size, int64_t num_classes,
+                                double smoothing, double *grad_out);
+
+/* ── ROC-AUC Score (metrics_losses.c) ─────────────────────────────── */
+
+int roc_auc_score(const double *y_true, const double *y_score,
+                  int64_t n, double *auc_out);
+
 #ifdef __cplusplus
 }
 #endif

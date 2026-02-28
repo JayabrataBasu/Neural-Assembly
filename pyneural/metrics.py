@@ -237,3 +237,40 @@ def top_k_accuracy(
         if target in top_k_classes:
             correct += 1
     return correct / len(targets)
+
+
+def roc_auc_score(y_true: List[int], y_score: List[float]) -> float:
+    """
+    Compute ROC-AUC for binary classification (C-backed).
+
+    Args:
+        y_true:  Ground-truth binary labels (0 or 1).
+        y_score: Predicted probabilities / scores for the positive class.
+
+    Returns:
+        Area under the ROC curve.  Returns 0.0 when only one class is
+        present (AUC is undefined in that case).
+
+    Raises:
+        ValueError: If inputs are empty or of different lengths.
+    """
+    if len(y_true) == 0:
+        raise ValueError("y_true must not be empty")
+    if len(y_true) != len(y_score):
+        raise ValueError(
+            f"y_true and y_score must have same length, "
+            f"got {len(y_true)} and {len(y_score)}"
+        )
+    n = len(y_true)
+    yt_arr = (ctypes.c_double * n)(*[float(v) for v in y_true])
+    ys_arr = (ctypes.c_double * n)(*[float(v) for v in y_score])
+    auc = ctypes.c_double()
+    result = _lib.roc_auc_score(
+        ctypes.cast(yt_arr, ctypes.c_void_p),
+        ctypes.cast(ys_arr, ctypes.c_void_p),
+        n,
+        ctypes.byref(auc),
+    )
+    if result != 0:
+        raise RuntimeError("roc_auc_score failed in C backend")
+    return auc.value

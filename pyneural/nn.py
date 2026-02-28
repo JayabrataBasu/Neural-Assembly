@@ -545,3 +545,100 @@ class CrossEntropyLoss(Module):
     
     def __repr__(self) -> str:
         return "CrossEntropyLoss()"
+
+
+class LabelSmoothingCrossEntropy(Module):
+    """
+    Cross-entropy loss with label smoothing.
+
+    Smoothed target:  (1 - α) · one_hot(target) + α / K
+
+    Works with raw double* arrays via forward_f64 / backward_f64,
+    or with Python lists via forward / backward.
+
+    Args:
+        smoothing: Label smoothing factor α ∈ [0, 1].  0 = standard CE.
+        num_classes: Number of output classes (required).
+    """
+
+    def __init__(self, num_classes: int, smoothing: float = 0.1):
+        super().__init__()
+        if not (0.0 <= smoothing <= 1.0):
+            raise ValueError(f"smoothing must be in [0, 1], got {smoothing}")
+        if num_classes < 1:
+            raise ValueError(f"num_classes must be >= 1, got {num_classes}")
+        self.smoothing = smoothing
+        self.num_classes = num_classes
+        self._cached_logits = None
+        self._cached_targets = None
+        self._cached_batch_size = None
+
+    def forward_f64(self, logits_ptr, targets_ptr, batch_size):
+        """
+        Forward pass using raw double*/int64_t* pointers.
+
+        Args:
+            logits_ptr:  c_void_p to double[batch_size * num_classes]
+            targets_ptr: c_void_p to int64_t[batch_size]
+            batch_size:  number of samples
+
+        Returns:
+            float: mean loss
+        """
+        loss = ctypes.c_double()
+        result = _lib.label_smoothing_ce_forward(
+            logits_ptr, targets_ptr,
+            batch_size, self.num_classes,
+            self.smoothing, ctypes.byref(loss)
+        )
+        _check_error(result, "label_smoothing_ce_forward")
+        self._cached_logits = logits_ptr
+        self._cached_targets = targets_ptr
+        self._cached_batch_size = batch_size
+        return loss.value
+
+    def backward_f64(self, grad_out_ptr, logits_ptr=None, targets_ptr=None, batch_size=None):
+        """
+        Backward pass using raw pointers.  Falls back to cached values from forward.
+
+        Args:
+            grad_out_ptr: c_void_p to double[batch_size * num_classes] (output)
+            logits_ptr:   optional override (default: use cached from forward)
+            targets_ptr:  optional override
+            batch_size:   optional override
+        """
+        lp = logits_ptr if logits_ptr is not None else self._cached_logits
+        tp = targets_ptr if targets_ptr is not None else self._cached_targets
+        bs = batch_size if batch_size is not None else self._cached_batch_size
+        if lp is None or tp is None or bs is None:
+            raise RuntimeError("backward called before forward; provide explicit pointers")
+        result = _lib.label_smoothing_ce_backward(
+            lp, tp, bs, self.num_classes, self.smoothing, grad_out_ptr
+        )
+        _check_error(result, "label_smoothing_ce_backward")
+
+    def forward(self, logits_list, targets_list):
+        """
+        Convenience: accept Python lists.
+
+        Args:
+            logits_list: flat list of floats, length batch_size * num_classes
+            targets_list: list of int class indices, length batch_size
+        Returns:
+            float: mean loss
+        """
+        bs = len(targets_list)
+        nc = self.num_classes
+        logits_arr = (ctypes.c_double * (bs * nc))(*logits_list)
+        targets_arr = (ctypes.c_int64 * bs)(*targets_list)
+        return self.forward_f64(
+            ctypes.cast(logits_arr, ctypes.c_void_p),
+            ctypes.cast(targets_arr, ctypes.c_void_p),
+            bs
+        )
+
+    def __call__(self, logits, targets):
+        return self.forward(logits, targets)
+
+    def __repr__(self) -> str:
+        return f"LabelSmoothingCrossEntropy(num_classes={self.num_classes}, smoothing={self.smoothing})"
