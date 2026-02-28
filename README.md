@@ -365,7 +365,7 @@ momentum = 0.9
 
 ## File Structure
 
-```
+```asm
 Neural Assembly/
 ├── main.asm            # Entry point and CLI
 ├── mem.asm             # Memory management (arena allocator)
@@ -500,6 +500,7 @@ This is an educational project demonstrating low-level ML implementation. Contri
 Every feature below has a dedicated test suite and passes the full 23-check validation.
 
 ### Core Infrastructure (v1.0)
+
 - ✅ **Confusion Matrix & Per-Class Metrics** — Precision, recall, F1 per class (assembly)
 - ✅ **Early Stopping** — Patience-based validation loss monitoring
 - ✅ **LR Scheduling** — Step decay, exponential decay, cosine annealing, warmup, ReduceLROnPlateau
@@ -510,6 +511,7 @@ Every feature below has a dedicated test suite and passes the full 23-check vali
 - ✅ **Class-Balanced Sampling** — `WeightedRandomSampler` backed by assembly
 
 ### Extended Modules (v1.1–v1.2)
+
 - ✅ **TensorBoard Logging** — C TFEvent writer + Python `SummaryWriter`
 - ✅ **Model Pruning** — Magnitude, top-k, structured row/column (C + Python)
 - ✅ **INT8 Quantization** — Symmetric/affine, calibration, quantized matmul (C + Python)
@@ -519,23 +521,28 @@ Every feature below has a dedicated test suite and passes the full 23-check vali
 - ✅ **Checkpoint Save/Resume** — Binary format v1 with metadata (14 tests)
 
 ### Normalization & Losses (v1.2)
+
 - ✅ **BatchNorm1d** — Running-mean EMA, train/eval modes, full backward (C, 22 tests)
 - ✅ **LayerNorm** — Per-sample normalization, no running stats (C, 16 tests)
 - ✅ **Label Smoothing** — Numerically stable log-softmax + smoothed targets (C, 17 tests)
 - ✅ **ROC-AUC** — Trapezoidal integration on sorted FPR/TPR curve (C, 16 tests)
 
 ### Data & Embeddings (v1.2)
+
 - ✅ **Data Transforms** — Z-score, min-max, Compose pipeline (C, 37 tests)
 - ✅ **Embedding Layer** — Row lookup + gradient accumulation backward (C, 19 tests)
 
 ### Schedulers & Diagnostics (v1.2)
+
 - ✅ **OneCycleLR** — Linear warmup + cosine annealing, per-step (35 tests)
 - ✅ **LRFinder** — Exponential sweep, EMA smoothing, auto-suggestion (39 tests)
 
 ### Fuzzy Logic (v1.2)
+
 - ✅ **Fuzzy Inference Engine** — Mamdani rule engine, 3 MF types, 3 defuzz methods (C, 65 tests)
 
 ### Convolution & Pooling (v2.0)
+
 - ✅ **Conv2D** — Im2col + GEMM forward/backward, Kaiming init, bias support (C, 83 tests combined)
 - ✅ **MaxPool2D** — Argmax-mask forward + scatter backward (C)
 
