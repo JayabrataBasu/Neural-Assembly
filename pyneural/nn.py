@@ -182,8 +182,7 @@ class Tanh(Module):
     
     def forward(self, x: Tensor) -> Tensor:
         output = Tensor.create(x.shape, x.dtype)
-        # Note: Using sigmoid as placeholder if tanh not available
-        result = _lib.neural_sigmoid(output._ptr, x._ptr)  # TODO: Use tanh when available
+        result = _lib.neural_tanh(output._ptr, x._ptr)
         _check_error(result, "tanh")
         return output
     

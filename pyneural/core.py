@@ -188,6 +188,36 @@ _lib.neural_sigmoid.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 _lib.neural_softmax.restype = ctypes.c_int
 _lib.neural_softmax.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
+_lib.neural_tanh.restype = ctypes.c_int
+_lib.neural_tanh.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+
+_lib.neural_gelu.restype = ctypes.c_int
+_lib.neural_gelu.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+
+_lib.neural_leaky_relu.restype = ctypes.c_int
+_lib.neural_leaky_relu.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double]
+
+_lib.neural_elu.restype = ctypes.c_int
+_lib.neural_elu.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double]
+
+_lib.neural_selu.restype = ctypes.c_int
+_lib.neural_selu.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+
+_lib.neural_swish.restype = ctypes.c_int
+_lib.neural_swish.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+
+_lib.neural_mish.restype = ctypes.c_int
+_lib.neural_mish.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+
+_lib.neural_hardswish.restype = ctypes.c_int
+_lib.neural_hardswish.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+
+_lib.neural_softplus.restype = ctypes.c_int
+_lib.neural_softplus.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+
+_lib.neural_hardtanh.restype = ctypes.c_int
+_lib.neural_hardtanh.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+
 # Linear layer
 _lib.neural_linear_create.restype = ctypes.c_void_p
 _lib.neural_linear_create.argtypes = [ctypes.c_uint64, ctypes.c_uint64, ctypes.c_int]
@@ -211,6 +241,15 @@ _lib.neural_sgd_create.argtypes = [ctypes.c_double, ctypes.c_double]
 
 _lib.neural_adam_create.restype = ctypes.c_void_p
 _lib.neural_adam_create.argtypes = [
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_double,
+    ctypes.c_double,
+]
+
+_lib.neural_adamw_create.restype = ctypes.c_void_p
+_lib.neural_adamw_create.argtypes = [
+    ctypes.c_double,
     ctypes.c_double,
     ctypes.c_double,
     ctypes.c_double,
