@@ -750,6 +750,84 @@ _lib.roc_auc_score.argtypes = [
     ctypes.POINTER(ctypes.c_double),  # auc_out
 ]
 
+# ── Data Transforms (transforms.c) ────────────────────────────────
+_lib.transform_compute_stats.restype = ctypes.c_int
+_lib.transform_compute_stats.argtypes = [
+    ctypes.c_void_p,   # const double* data
+    ctypes.c_int64,    # batch_size
+    ctypes.c_int64,    # num_features
+    ctypes.c_void_p,   # double* mean_out (nullable)
+    ctypes.c_void_p,   # double* std_out  (nullable)
+    ctypes.c_void_p,   # double* min_out  (nullable)
+    ctypes.c_void_p,   # double* max_out  (nullable)
+]
+
+_lib.transform_normalize.restype = ctypes.c_int
+_lib.transform_normalize.argtypes = [
+    ctypes.c_void_p,   # const double* data
+    ctypes.c_void_p,   # double* output
+    ctypes.c_int64,    # batch_size
+    ctypes.c_int64,    # num_features
+    ctypes.c_void_p,   # const double* mean
+    ctypes.c_void_p,   # const double* std
+    ctypes.c_double,   # eps
+]
+
+_lib.transform_unnormalize.restype = ctypes.c_int
+_lib.transform_unnormalize.argtypes = [
+    ctypes.c_void_p,   # const double* data
+    ctypes.c_void_p,   # double* output
+    ctypes.c_int64,    # batch_size
+    ctypes.c_int64,    # num_features
+    ctypes.c_void_p,   # const double* mean
+    ctypes.c_void_p,   # const double* std
+    ctypes.c_double,   # eps
+]
+
+_lib.transform_minmax.restype = ctypes.c_int
+_lib.transform_minmax.argtypes = [
+    ctypes.c_void_p,   # const double* data
+    ctypes.c_void_p,   # double* output
+    ctypes.c_int64,    # batch_size
+    ctypes.c_int64,    # num_features
+    ctypes.c_void_p,   # const double* min_val
+    ctypes.c_void_p,   # const double* max_val
+    ctypes.c_double,   # eps
+]
+
+# ── Embedding Layer (embedding.c) ─────────────────────────────────
+_lib.embedding_create.restype = ctypes.c_void_p
+_lib.embedding_create.argtypes = [ctypes.c_int64, ctypes.c_int64]
+
+_lib.embedding_free.restype = None
+_lib.embedding_free.argtypes = [ctypes.c_void_p]
+
+_lib.embedding_forward.restype = ctypes.c_int
+_lib.embedding_forward.argtypes = [
+    ctypes.c_void_p,   # const Embedding*
+    ctypes.c_void_p,   # const int64_t* indices
+    ctypes.c_int64,    # seq_len
+    ctypes.c_void_p,   # double* output
+]
+
+_lib.embedding_backward.restype = ctypes.c_int
+_lib.embedding_backward.argtypes = [
+    ctypes.c_void_p,   # const Embedding*
+    ctypes.c_void_p,   # const int64_t* indices
+    ctypes.c_int64,    # seq_len
+    ctypes.c_void_p,   # const double* grad_output
+    ctypes.c_void_p,   # double* grad_weight
+]
+
+_lib.embedding_weight.restype = ctypes.c_void_p
+_lib.embedding_weight.argtypes = [ctypes.c_void_p]
+
+_lib.embedding_num_embeddings.restype = ctypes.c_int64
+_lib.embedding_num_embeddings.argtypes = [ctypes.c_void_p]
+
+_lib.embedding_dim.restype = ctypes.c_int64
+_lib.embedding_dim.argtypes = [ctypes.c_void_p]
+
 
 def _check_error(result: int, operation: str = "operation"):
     """Check result code and raise exception if error."""

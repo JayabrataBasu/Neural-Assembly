@@ -29,7 +29,7 @@ Example Usage:
 from .tensor import Tensor
 from .nn import (
     Linear, ReLU, Sigmoid, Softmax, Dropout, Sequential,
-    BatchNorm1d, LayerNorm,
+    BatchNorm1d, LayerNorm, Embedding,
     MSELoss, CrossEntropyLoss, LabelSmoothingCrossEntropy,
 )
 from .optim import SGD, Adam
@@ -79,6 +79,7 @@ from .checkpoint import save_checkpoint, load_checkpoint
 from .tb_logger import SummaryWriter
 from .pruning import Pruner, prune_magnitude, prune_rows, prune_cols
 from .quantize import Quantizer, QuantParams, quantized_matmul
+from .transforms import Normalize, MinMaxScale, Compose, compute_stats
 
 import importlib as _importlib
 weight_init = _importlib.import_module('.init', __name__)
@@ -106,6 +107,7 @@ __all__ = [
     "Softmax",
     "Dropout",
     "Sequential",
+    "Embedding",
     # Normalization
     "BatchNorm1d",
     "LayerNorm",
@@ -168,4 +170,9 @@ __all__ = [
     "Quantizer",
     "QuantParams",
     "quantized_matmul",
+    # Transforms
+    "Normalize",
+    "MinMaxScale",
+    "Compose",
+    "compute_stats",
 ]

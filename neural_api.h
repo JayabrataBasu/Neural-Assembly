@@ -1045,6 +1045,36 @@ int label_smoothing_ce_backward(const double *logits, const int64_t *targets,
 int roc_auc_score(const double *y_true, const double *y_score,
                   int64_t n, double *auc_out);
 
+/* ── Data Transforms (transforms.c) ──────────────────────────────── */
+
+int transform_compute_stats(const double *data, int64_t batch_size,
+                            int64_t num_features, double *mean_out,
+                            double *std_out, double *min_out, double *max_out);
+int transform_normalize(const double *data, double *output,
+                        int64_t batch_size, int64_t num_features,
+                        const double *mean, const double *std, double eps);
+int transform_unnormalize(const double *data, double *output,
+                          int64_t batch_size, int64_t num_features,
+                          const double *mean, const double *std, double eps);
+int transform_minmax(const double *data, double *output,
+                     int64_t batch_size, int64_t num_features,
+                     const double *min_val, const double *max_val, double eps);
+
+/* ── Embedding Layer (embedding.c) ───────────────────────────────── */
+
+typedef struct Embedding Embedding;
+
+Embedding  *embedding_create(int64_t num_embeddings, int64_t embedding_dim);
+void        embedding_free(Embedding *emb);
+int         embedding_forward(const Embedding *emb, const int64_t *indices,
+                              int64_t seq_len, double *output);
+int         embedding_backward(const Embedding *emb, const int64_t *indices,
+                               int64_t seq_len, const double *grad_output,
+                               double *grad_weight);
+double     *embedding_weight(Embedding *emb);
+int64_t     embedding_num_embeddings(Embedding *emb);
+int64_t     embedding_dim(Embedding *emb);
+
 #ifdef __cplusplus
 }
 #endif

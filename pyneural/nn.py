@@ -642,3 +642,102 @@ class LabelSmoothingCrossEntropy(Module):
 
     def __repr__(self) -> str:
         return f"LabelSmoothingCrossEntropy(num_classes={self.num_classes}, smoothing={self.smoothing})"
+
+
+class Embedding(Module):
+    """
+    Embedding lookup table (C-backed).
+
+    Stores a weight matrix W[num_embeddings × embedding_dim] in float64.
+    Forward maps integer indices to their corresponding embedding vectors.
+
+    Args:
+        num_embeddings: Size of the dictionary (vocabulary size).
+        embedding_dim: Size of each embedding vector.
+    """
+
+    def __init__(self, num_embeddings: int, embedding_dim: int):
+        super().__init__()
+        if num_embeddings < 1:
+            raise ValueError(f"num_embeddings must be >= 1, got {num_embeddings}")
+        if embedding_dim < 1:
+            raise ValueError(f"embedding_dim must be >= 1, got {embedding_dim}")
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self._ptr = _lib.embedding_create(num_embeddings, embedding_dim)
+        if not self._ptr:
+            raise MemoryError("Failed to create Embedding")
+        self._cached_indices = None
+        self._cached_seq_len = None
+
+    def __del__(self):
+        if hasattr(self, '_ptr') and self._ptr:
+            _lib.embedding_free(self._ptr)
+            self._ptr = None
+
+    @property
+    def weight_ptr(self):
+        """Raw pointer to the weight matrix (double*)."""
+        return _lib.embedding_weight(self._ptr)
+
+    def forward_f64(self, indices_ptr, seq_len, output_ptr):
+        """
+        Forward pass using raw pointers.
+
+        Args:
+            indices_ptr: c_void_p to int64_t[seq_len]
+            seq_len: number of indices
+            output_ptr: c_void_p to double[seq_len * embedding_dim]
+        Returns:
+            int: 0 on success
+        """
+        result = _lib.embedding_forward(self._ptr, indices_ptr, seq_len, output_ptr)
+        _check_error(result, "embedding_forward")
+        self._cached_indices = indices_ptr
+        self._cached_seq_len = seq_len
+        return result
+
+    def backward_f64(self, grad_output_ptr, grad_weight_ptr,
+                     indices_ptr=None, seq_len=None):
+        """
+        Backward pass using raw pointers.
+
+        Args:
+            grad_output_ptr: c_void_p to double[seq_len * embedding_dim]
+            grad_weight_ptr: c_void_p to double[num_embeddings * embedding_dim]
+                             (accumulated, must be pre-zeroed if fresh)
+            indices_ptr: optional override
+            seq_len: optional override
+        """
+        ip = indices_ptr if indices_ptr is not None else self._cached_indices
+        sl = seq_len if seq_len is not None else self._cached_seq_len
+        if ip is None or sl is None:
+            raise RuntimeError("backward called before forward; provide explicit pointers")
+        result = _lib.embedding_backward(self._ptr, ip, sl, grad_output_ptr, grad_weight_ptr)
+        _check_error(result, "embedding_backward")
+
+    def forward(self, indices_list):
+        """
+        Convenience: accept Python list of int indices.
+
+        Args:
+            indices_list: List of integer indices.
+
+        Returns:
+            List of float (flat, length = len(indices) * embedding_dim).
+        """
+        seq_len = len(indices_list)
+        idx_arr = (ctypes.c_int64 * seq_len)(*indices_list)
+        out_arr = (ctypes.c_double * (seq_len * self.embedding_dim))()
+        self.forward_f64(
+            ctypes.cast(idx_arr, ctypes.c_void_p),
+            seq_len,
+            ctypes.cast(out_arr, ctypes.c_void_p),
+        )
+        return [float(out_arr[i]) for i in range(seq_len * self.embedding_dim)]
+
+    def __call__(self, indices):
+        return self.forward(indices)
+
+    def __repr__(self) -> str:
+        return f"Embedding({self.num_embeddings}, {self.embedding_dim})"
