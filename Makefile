@@ -53,7 +53,10 @@ C_SRCS = tb_logger.c \
          transforms.c \
          embedding.c \
          fuzzy.c \
-         conv2d.c
+         conv2d.c \
+         activations_c.c \
+         optimizers_c.c \
+         rnn.c
 
 # Library assembly sources (excluding main.asm for shared library)
 LIB_ASM_SRCS = mem.asm \

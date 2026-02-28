@@ -10,18 +10,17 @@ import os
 lib_path = os.path.join(os.path.dirname(__file__), 'libneural.so')
 lib = ctypes.CDLL(lib_path)
 
-# Function signatures
-lib.neural_init.argtypes = []
-lib.neural_init.restype = ctypes.c_int
-lib.neural_adamw_create.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double]
-lib.neural_adamw_create.restype = ctypes.c_void_p
+# C optimizer API (optimizers_c.c)
+lib.opt_adamw_create.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double]
+lib.opt_adamw_create.restype = ctypes.c_void_p
+lib.opt_get_lr.argtypes = [ctypes.c_void_p]
+lib.opt_get_lr.restype = ctypes.c_double
+lib.opt_free.argtypes = [ctypes.c_void_p]
+lib.opt_free.restype = None
 
 def test_adamw_basic():
     """Test basic AdamW optimizer functionality"""
     print("Testing AdamW optimizer...")
-
-    # Initialize framework runtime first
-    lib.neural_init()
     
     # Test parameters
     lr = 0.01
@@ -30,16 +29,18 @@ def test_adamw_basic():
     eps = 1e-8
     weight_decay = 0.01
     
-    # Create AdamW optimizer
-    optimizer = lib.neural_adamw_create(lr, beta1, beta2, eps, weight_decay)
+    # Create AdamW optimizer via C backend
+    optimizer = lib.opt_adamw_create(lr, beta1, beta2, eps, weight_decay)
     
     if optimizer:
+        actual_lr = lib.opt_get_lr(optimizer)
         print("✓ PASS: AdamW optimizer created successfully")
-        print(f"  Learning rate: {lr}")
+        print(f"  Learning rate: {actual_lr}")
         print(f"  Beta1: {beta1}")
         print(f"  Beta2: {beta2}")
         print(f"  Epsilon: {eps}")
         print(f"  Weight decay: {weight_decay}")
+        lib.opt_free(optimizer)
         return True
     else:
         print("✗ FAIL: AdamW optimizer creation failed")

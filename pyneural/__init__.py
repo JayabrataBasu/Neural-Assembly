@@ -28,11 +28,11 @@ Example Usage:
 
 from .tensor import Tensor
 from .nn import (
-    Linear, ReLU, Sigmoid, Softmax, Dropout, Sequential,
+    Linear, ReLU, Sigmoid, Softmax, Tanh, Dropout, Sequential,
     BatchNorm1d, LayerNorm, Embedding,
     MSELoss, CrossEntropyLoss, LabelSmoothingCrossEntropy,
 )
-from .optim import SGD, Adam
+from .optim import SGD, Adam, AdamW
 from .autograd import (
     no_grad,
     enable_grad,
@@ -89,6 +89,10 @@ from .fuzzy import (
     defuzz_centroid, defuzz_bisector, defuzz_mom,
 )
 from .conv import Conv2D, MaxPool2D, calc_output_size
+from .activations import (
+    GELU, LeakyReLU, ELU, SELU, Swish, Mish, HardSwish, Softplus, HardTanh,
+)
+from .rnn import LSTM, GRU
 
 import importlib as _importlib
 weight_init = _importlib.import_module('.init', __name__)
@@ -114,6 +118,7 @@ __all__ = [
     "ReLU",
     "Sigmoid",
     "Softmax",
+    "Tanh",
     "Dropout",
     "Sequential",
     "Embedding",
@@ -127,6 +132,7 @@ __all__ = [
     # Optimizers
     "SGD",
     "Adam",
+    "AdamW",
     # Autograd
     "no_grad",
     "enable_grad",
@@ -201,4 +207,17 @@ __all__ = [
     "Conv2D",
     "MaxPool2D",
     "calc_output_size",
+    # Extended Activations
+    "GELU",
+    "LeakyReLU",
+    "ELU",
+    "SELU",
+    "Swish",
+    "Mish",
+    "HardSwish",
+    "Softplus",
+    "HardTanh",
+    # Recurrent Layers
+    "LSTM",
+    "GRU",
 ]

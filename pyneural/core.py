@@ -188,35 +188,36 @@ _lib.neural_sigmoid.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 _lib.neural_softmax.restype = ctypes.c_int
 _lib.neural_softmax.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
-_lib.neural_tanh.restype = ctypes.c_int
-_lib.neural_tanh.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+# C-level activations (activations_c.c) — bypass the autograd node layer
+_lib.act_tanh.restype = ctypes.c_int
+_lib.act_tanh.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
-_lib.neural_gelu.restype = ctypes.c_int
-_lib.neural_gelu.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_lib.act_gelu.restype = ctypes.c_int
+_lib.act_gelu.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
-_lib.neural_leaky_relu.restype = ctypes.c_int
-_lib.neural_leaky_relu.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double]
+_lib.act_leaky_relu.restype = ctypes.c_int
+_lib.act_leaky_relu.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double]
 
-_lib.neural_elu.restype = ctypes.c_int
-_lib.neural_elu.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double]
+_lib.act_elu.restype = ctypes.c_int
+_lib.act_elu.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_double]
 
-_lib.neural_selu.restype = ctypes.c_int
-_lib.neural_selu.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_lib.act_selu.restype = ctypes.c_int
+_lib.act_selu.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
-_lib.neural_swish.restype = ctypes.c_int
-_lib.neural_swish.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_lib.act_swish.restype = ctypes.c_int
+_lib.act_swish.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
-_lib.neural_mish.restype = ctypes.c_int
-_lib.neural_mish.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_lib.act_mish.restype = ctypes.c_int
+_lib.act_mish.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
-_lib.neural_hardswish.restype = ctypes.c_int
-_lib.neural_hardswish.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_lib.act_hardswish.restype = ctypes.c_int
+_lib.act_hardswish.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
-_lib.neural_softplus.restype = ctypes.c_int
-_lib.neural_softplus.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_lib.act_softplus.restype = ctypes.c_int
+_lib.act_softplus.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
-_lib.neural_hardtanh.restype = ctypes.c_int
-_lib.neural_hardtanh.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+_lib.act_hardtanh.restype = ctypes.c_int
+_lib.act_hardtanh.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
 # Linear layer
 _lib.neural_linear_create.restype = ctypes.c_void_p
@@ -235,7 +236,7 @@ _lib.neural_linear_weight.argtypes = [ctypes.c_void_p]
 _lib.neural_linear_bias.restype = ctypes.c_void_p
 _lib.neural_linear_bias.argtypes = [ctypes.c_void_p]
 
-# Optimizers
+# Optimizers (assembly — internal use only, kept for backward compat)
 _lib.neural_sgd_create.restype = ctypes.c_void_p
 _lib.neural_sgd_create.argtypes = [ctypes.c_double, ctypes.c_double]
 
@@ -258,6 +259,101 @@ _lib.neural_adamw_create.argtypes = [
 
 _lib.neural_optimizer_free.restype = None
 _lib.neural_optimizer_free.argtypes = [ctypes.c_void_p]
+
+# C-level optimizers (optimizers_c.c) — these actually work from Python
+_lib.opt_sgd_create.restype = ctypes.c_void_p
+_lib.opt_sgd_create.argtypes = [ctypes.c_double, ctypes.c_double]
+
+_lib.opt_adam_create.restype = ctypes.c_void_p
+_lib.opt_adam_create.argtypes = [
+    ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double,
+]
+
+_lib.opt_adamw_create.restype = ctypes.c_void_p
+_lib.opt_adamw_create.argtypes = [
+    ctypes.c_double, ctypes.c_double, ctypes.c_double,
+    ctypes.c_double, ctypes.c_double,
+]
+
+_lib.opt_step.restype = ctypes.c_int
+_lib.opt_step.argtypes = [
+    ctypes.c_void_p,                         # optimizer
+    ctypes.POINTER(ctypes.c_void_p),         # params
+    ctypes.POINTER(ctypes.c_void_p),         # grads
+    ctypes.c_int64,                          # n
+]
+
+_lib.opt_free.restype = None
+_lib.opt_free.argtypes = [ctypes.c_void_p]
+
+_lib.opt_get_lr.restype = ctypes.c_double
+_lib.opt_get_lr.argtypes = [ctypes.c_void_p]
+
+_lib.opt_set_lr.restype = None
+_lib.opt_set_lr.argtypes = [ctypes.c_void_p, ctypes.c_double]
+
+# RNN layers (rnn.c)
+_lib.lstm_create.restype = ctypes.c_void_p
+_lib.lstm_create.argtypes = [ctypes.c_int64, ctypes.c_int64]
+
+_lib.lstm_free.restype = None
+_lib.lstm_free.argtypes = [ctypes.c_void_p]
+
+_lib.lstm_forward.restype = ctypes.c_int
+_lib.lstm_forward.argtypes = [
+    ctypes.c_void_p,                         # layer
+    ctypes.POINTER(ctypes.c_double),         # input
+    ctypes.POINTER(ctypes.c_double),         # output
+    ctypes.POINTER(ctypes.c_double),         # h_out
+    ctypes.POINTER(ctypes.c_double),         # c_out
+    ctypes.POINTER(ctypes.c_double),         # h_init (nullable)
+    ctypes.POINTER(ctypes.c_double),         # c_init (nullable)
+    ctypes.c_int64,                          # batch
+    ctypes.c_int64,                          # seq_len
+]
+
+_lib.lstm_weight_ih.restype = ctypes.POINTER(ctypes.c_double)
+_lib.lstm_weight_ih.argtypes = [ctypes.c_void_p]
+_lib.lstm_weight_hh.restype = ctypes.POINTER(ctypes.c_double)
+_lib.lstm_weight_hh.argtypes = [ctypes.c_void_p]
+_lib.lstm_bias_ih.restype = ctypes.POINTER(ctypes.c_double)
+_lib.lstm_bias_ih.argtypes = [ctypes.c_void_p]
+_lib.lstm_bias_hh.restype = ctypes.POINTER(ctypes.c_double)
+_lib.lstm_bias_hh.argtypes = [ctypes.c_void_p]
+_lib.lstm_input_size.restype = ctypes.c_int64
+_lib.lstm_input_size.argtypes = [ctypes.c_void_p]
+_lib.lstm_hidden_size.restype = ctypes.c_int64
+_lib.lstm_hidden_size.argtypes = [ctypes.c_void_p]
+
+_lib.gru_create.restype = ctypes.c_void_p
+_lib.gru_create.argtypes = [ctypes.c_int64, ctypes.c_int64]
+
+_lib.gru_free.restype = None
+_lib.gru_free.argtypes = [ctypes.c_void_p]
+
+_lib.gru_forward.restype = ctypes.c_int
+_lib.gru_forward.argtypes = [
+    ctypes.c_void_p,                         # layer
+    ctypes.POINTER(ctypes.c_double),         # input
+    ctypes.POINTER(ctypes.c_double),         # output
+    ctypes.POINTER(ctypes.c_double),         # h_out
+    ctypes.POINTER(ctypes.c_double),         # h_init (nullable)
+    ctypes.c_int64,                          # batch
+    ctypes.c_int64,                          # seq_len
+]
+
+_lib.gru_weight_ih.restype = ctypes.POINTER(ctypes.c_double)
+_lib.gru_weight_ih.argtypes = [ctypes.c_void_p]
+_lib.gru_weight_hh.restype = ctypes.POINTER(ctypes.c_double)
+_lib.gru_weight_hh.argtypes = [ctypes.c_void_p]
+_lib.gru_bias_ih.restype = ctypes.POINTER(ctypes.c_double)
+_lib.gru_bias_ih.argtypes = [ctypes.c_void_p]
+_lib.gru_bias_hh.restype = ctypes.POINTER(ctypes.c_double)
+_lib.gru_bias_hh.argtypes = [ctypes.c_void_p]
+_lib.gru_input_size.restype = ctypes.c_int64
+_lib.gru_input_size.argtypes = [ctypes.c_void_p]
+_lib.gru_hidden_size.restype = ctypes.c_int64
+_lib.gru_hidden_size.argtypes = [ctypes.c_void_p]
 
 # Loss functions
 _lib.neural_mse_loss.restype = ctypes.c_int

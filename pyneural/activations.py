@@ -27,7 +27,7 @@ class GELU(Module):
 
     def forward(self, x: Tensor) -> Tensor:
         out = Tensor.create(x.shape, x.dtype)
-        _check_error(_lib.neural_gelu(out._ptr, x._ptr), "gelu")
+        _check_error(_lib.act_gelu(out._ptr, x._ptr), "gelu")
         return out
 
     def __repr__(self) -> str:
@@ -52,7 +52,7 @@ class LeakyReLU(Module):
     def forward(self, x: Tensor) -> Tensor:
         out = Tensor.create(x.shape, x.dtype)
         _check_error(
-            _lib.neural_leaky_relu(out._ptr, x._ptr, self.alpha),
+            _lib.act_leaky_relu(out._ptr, x._ptr, self.alpha),
             "leaky_relu",
         )
         return out
@@ -81,7 +81,7 @@ class ELU(Module):
     def forward(self, x: Tensor) -> Tensor:
         out = Tensor.create(x.shape, x.dtype)
         _check_error(
-            _lib.neural_elu(out._ptr, x._ptr, self.alpha),
+            _lib.act_elu(out._ptr, x._ptr, self.alpha),
             "elu",
         )
         return out
@@ -103,7 +103,7 @@ class SELU(Module):
 
     def forward(self, x: Tensor) -> Tensor:
         out = Tensor.create(x.shape, x.dtype)
-        _check_error(_lib.neural_selu(out._ptr, x._ptr), "selu")
+        _check_error(_lib.act_selu(out._ptr, x._ptr), "selu")
         return out
 
     def __repr__(self) -> str:
@@ -121,7 +121,7 @@ class Swish(Module):
 
     def forward(self, x: Tensor) -> Tensor:
         out = Tensor.create(x.shape, x.dtype)
-        _check_error(_lib.neural_swish(out._ptr, x._ptr), "swish")
+        _check_error(_lib.act_swish(out._ptr, x._ptr), "swish")
         return out
 
     def __repr__(self) -> str:
@@ -139,7 +139,7 @@ class Mish(Module):
 
     def forward(self, x: Tensor) -> Tensor:
         out = Tensor.create(x.shape, x.dtype)
-        _check_error(_lib.neural_mish(out._ptr, x._ptr), "mish")
+        _check_error(_lib.act_mish(out._ptr, x._ptr), "mish")
         return out
 
     def __repr__(self) -> str:
@@ -157,7 +157,7 @@ class HardSwish(Module):
 
     def forward(self, x: Tensor) -> Tensor:
         out = Tensor.create(x.shape, x.dtype)
-        _check_error(_lib.neural_hardswish(out._ptr, x._ptr), "hardswish")
+        _check_error(_lib.act_hardswish(out._ptr, x._ptr), "hardswish")
         return out
 
     def __repr__(self) -> str:
@@ -175,7 +175,7 @@ class Softplus(Module):
 
     def forward(self, x: Tensor) -> Tensor:
         out = Tensor.create(x.shape, x.dtype)
-        _check_error(_lib.neural_softplus(out._ptr, x._ptr), "softplus")
+        _check_error(_lib.act_softplus(out._ptr, x._ptr), "softplus")
         return out
 
     def __repr__(self) -> str:
@@ -193,7 +193,7 @@ class HardTanh(Module):
 
     def forward(self, x: Tensor) -> Tensor:
         out = Tensor.create(x.shape, x.dtype)
-        _check_error(_lib.neural_hardtanh(out._ptr, x._ptr), "hardtanh")
+        _check_error(_lib.act_hardtanh(out._ptr, x._ptr), "hardtanh")
         return out
 
     def __repr__(self) -> str:

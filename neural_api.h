@@ -486,6 +486,71 @@ int neural_softplus(NeuralTensor* out, const NeuralTensor* input);
 int neural_hardtanh(NeuralTensor* out, const NeuralTensor* input);
 
 /* ============================================================================ */
+/* C-level Activation Functions (activations_c.c)                              */
+/*                                                                             */
+/* These operate directly on tensor structs and bypass the autograd node layer. */
+/* Preferred over the neural_xxx assembly wrappers for Python FFI.             */
+/* ============================================================================ */
+int act_tanh(void *out, const void *in);
+int act_gelu(void *out, const void *in);
+int act_leaky_relu(void *out, const void *in, double alpha);
+int act_elu(void *out, const void *in, double alpha);
+int act_selu(void *out, const void *in);
+int act_swish(void *out, const void *in);
+int act_mish(void *out, const void *in);
+int act_hardswish(void *out, const void *in);
+int act_softplus(void *out, const void *in);
+int act_hardtanh(void *out, const void *in);
+
+/* ============================================================================ */
+/* C-level Optimizer Functions (optimizers_c.c)                                */
+/*                                                                             */
+/* Python-friendly optimizers that take param/grad arrays on each step() call. */
+/* ============================================================================ */
+void *opt_sgd_create(double lr, double momentum);
+void *opt_adam_create(double lr, double beta1, double beta2, double epsilon);
+void *opt_adamw_create(double lr, double beta1, double beta2,
+                       double epsilon, double weight_decay);
+int   opt_step(void *opt, void **params, void **grads, int64_t n);
+void  opt_free(void *opt);
+double opt_get_lr(void *opt);
+void   opt_set_lr(void *opt, double lr);
+
+/* ============================================================================ */
+/* Recurrent Layers (rnn.c)                                                    */
+/* ============================================================================ */
+
+/* LSTM */
+void   *lstm_create(int64_t input_size, int64_t hidden_size);
+void    lstm_free(void *layer);
+int     lstm_forward(void *layer,
+                     const double *input, double *output,
+                     double *h_out, double *c_out,
+                     const double *h_init, const double *c_init,
+                     int64_t batch, int64_t seq_len);
+double *lstm_weight_ih(void *layer);
+double *lstm_weight_hh(void *layer);
+double *lstm_bias_ih(void *layer);
+double *lstm_bias_hh(void *layer);
+int64_t lstm_input_size(void *layer);
+int64_t lstm_hidden_size(void *layer);
+
+/* GRU */
+void   *gru_create(int64_t input_size, int64_t hidden_size);
+void    gru_free(void *layer);
+int     gru_forward(void *layer,
+                    const double *input, double *output,
+                    double *h_out,
+                    const double *h_init,
+                    int64_t batch, int64_t seq_len);
+double *gru_weight_ih(void *layer);
+double *gru_weight_hh(void *layer);
+double *gru_bias_ih(void *layer);
+double *gru_bias_hh(void *layer);
+int64_t gru_input_size(void *layer);
+int64_t gru_hidden_size(void *layer);
+
+/* ============================================================================ */
 /* Neural Network Layers */
 /* ============================================================================ */
 

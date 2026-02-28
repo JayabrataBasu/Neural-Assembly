@@ -182,7 +182,7 @@ class Tanh(Module):
     
     def forward(self, x: Tensor) -> Tensor:
         output = Tensor.create(x.shape, x.dtype)
-        result = _lib.neural_tanh(output._ptr, x._ptr)
+        result = _lib.act_tanh(output._ptr, x._ptr)
         _check_error(result, "tanh")
         return output
     
