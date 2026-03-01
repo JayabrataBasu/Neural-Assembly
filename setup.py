@@ -13,7 +13,7 @@ if readme_path.exists():
 
 setup(
     name="pyneural",
-    version="1.0.0",
+    version="2.1.0",
     author="Neural Assembly Team",
     description="Python bindings for the Neural Assembly deep learning framework",
     long_description=long_description,

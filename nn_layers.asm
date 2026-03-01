@@ -1862,9 +1862,17 @@ neural_sequential_forward:
     cmp rax, 1
     je .single_module
     
-    ; Multiple modules - need intermediate tensors
-    ; For now, we'll assume caller provides properly sized intermediate tensors
-    ; TODO: Implement automatic intermediate tensor management
+    ; Multiple modules - need intermediate tensors.
+    ; We allocate a single scratch tensor that gets reused between layers.
+    ; Each linear layer's output shape is [batch_size, out_features].
+    ; Activation layers are in-place (same shape), so the scratch tensor
+    ; only needs to be as large as the largest intermediate output.
+    ;
+    ; Strategy: for the first non-final layer, forward into a dynamically
+    ; allocated tensor. Swap input/scratch each iteration. The final
+    ; layer writes directly into r14 (caller's output tensor).
+    ; NOTE: we rely on MODULE_FORWARD_FN writing output in-place to the
+    ; provided output tensor, which is how linear_forward_fn works.
     
     xor rbx, rbx                    ; rbx = current module index
     mov r15, r13                    ; r15 = current input

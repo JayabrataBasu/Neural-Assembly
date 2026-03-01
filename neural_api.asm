@@ -173,6 +173,7 @@ extern config_get_float
 extern config_get_string
 
 extern detect_cpu_features
+extern xorshift64
 
 ; Tensor struct offsets (must match tensor.asm)
 %define TENSOR_DATA     0
@@ -2091,9 +2092,107 @@ neural_get_simd_name:
 ; =============================================================================
 
 neural_tensor_random:
-    ; TODO: Implement random tensor creation
-    mov dword [rel last_error], NEURAL_ERR_NOT_IMPLEMENTED
+    ; Arguments: RDI = shape*, RSI = ndim, EDX = dtype
+    ; Returns: NeuralTensor* filled with uniform random values in [0, 1)
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+    push r13
+    sub rsp, 8
+
+    ; Validate arguments
+    test rdi, rdi
+    jz .rand_null
+
+    mov r12d, edx               ; save dtype
+
+    ; Create a zeros tensor first (tensor_create: rdi=ndim, rsi=shape, edx=dtype)
+    ; Note: tensor_create takes (ndim, shape*, dtype)
+    mov r13, rdi                ; save shape ptr temporarily
+    mov rdi, rsi                ; ndim
+    mov rsi, r13                ; shape*
+    mov edx, r12d               ; dtype
+    call tensor_create
+    test rax, rax
+    jz .rand_alloc_fail
+    mov rbx, rax                ; rbx = tensor*
+
+    ; Get element count
+    mov rdi, rbx
+    call tensor_numel
+    mov r13, rax                ; r13 = numel
+
+    ; Fill with random values in [0, 1)
+    mov rdi, [rbx + TENSOR_DATA]
+    cmp r12d, 1                 ; DT_FLOAT64?
+    je .rand_fill_f64
+
+    ; Float32 fill
+    mov rcx, r13
+.rand_f32_loop:
+    test rcx, rcx
+    jz .rand_done
+    push rcx
+    push rdi
+    call xorshift64             ; rax = 64-bit random
+    pop rdi
+    pop rcx
+    ; Convert to [0, 1): (rax >> 11) * (1.0 / 2^53)  — use 32-bit shortcut
+    shr eax, 9                  ; top 23 bits of lower 32
+    and eax, 0x007FFFFF         ; mantissa bits
+    or  eax, 0x3F800000         ; 1.0 + fraction -> [1.0, 2.0)
+    mov [rdi], eax
+    movss xmm0, [rdi]
+    mov eax, 0x3F800000         ; 1.0f
+    movd xmm1, eax
+    subss xmm0, xmm1            ; [0.0, 1.0)
+    movss [rdi], xmm0
+    add rdi, 4
+    dec rcx
+    jmp .rand_f32_loop
+
+.rand_fill_f64:
+    mov rcx, r13
+.rand_f64_loop:
+    test rcx, rcx
+    jz .rand_done
+    push rcx
+    push rdi
+    call xorshift64
+    pop rdi
+    pop rcx
+    ; Convert to [0, 1): (rax >> 11) * 2^-53
+    shr rax, 11                 ; 53-bit integer
+    cvtsi2sd xmm0, rax
+    mov rax, 0x3CA0000000000000  ; 2^-53 as double
+    movq xmm1, rax
+    mulsd xmm0, xmm1            ; [0.0, 1.0)
+    movsd [rdi], xmm0
+    add rdi, 8
+    dec rcx
+    jmp .rand_f64_loop
+
+.rand_done:
+    mov dword [rel last_error], NEURAL_OK
+    mov rax, rbx                ; return tensor
+    jmp .rand_cleanup
+
+.rand_null:
+    mov dword [rel last_error], NEURAL_ERR_NULL_POINTER
     xor eax, eax
+    jmp .rand_cleanup
+
+.rand_alloc_fail:
+    mov dword [rel last_error], NEURAL_ERR_OUT_OF_MEMORY
+    xor eax, eax
+
+.rand_cleanup:
+    add rsp, 8
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
     ret
 
 ; =============================================================================
@@ -2562,7 +2661,15 @@ neural_backward:
     ret
 
 neural_node_grad:
-    ; TODO: Get gradient from node
+    ; Arguments: RDI = Node*
+    ; Returns: NeuralTensor* (gradient tensor, or NULL if no grad)
+    test rdi, rdi
+    jz .node_grad_null
+    mov rax, [rdi + 8]          ; NODE_GRAD = offset 8
+    mov dword [rel last_error], NEURAL_OK
+    ret
+.node_grad_null:
+    mov dword [rel last_error], NEURAL_ERR_NULL_POINTER
     xor eax, eax
     ret
 

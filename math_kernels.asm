@@ -970,9 +970,141 @@ reduce_sum:
     ; For simplicity, handle axis=-1 (sum all elements)
     cmp r13, -1
     je .sum_all
-    
-    ; TODO: Implement axis-specific reduction
-    ; For now, fall through to sum all
+
+    ; Axis-specific reduction for 2D tensors.
+    ; axis=0: sum along rows   -> output shape [1, cols] (or just [cols])
+    ; axis=1: sum along columns -> output shape [rows, 1] (or just [rows])
+    ; For higher-dim tensors or axis > 1, fall back to sum_all.
+
+    mov rax, [r12 + TENSOR_NDIM]
+    cmp rax, 2
+    jne .sum_all                    ; only handle 2D for now
+
+    ; Load shape: shape[0] = rows, shape[1] = cols
+    mov rax, [r12 + TENSOR_SHAPE]
+    mov r15, [rax]                  ; rows
+    mov rbx, [rax + 8]             ; cols (use rbx temporarily, will push later)
+
+    cmp r13, 0
+    je .sum_axis0
+    cmp r13, 1
+    je .sum_axis1
+    jmp .sum_all                    ; unknown axis -> fall back
+
+; ---- axis=0: sum rows, output has 'cols' elements ----
+.sum_axis0:
+    ; out[j] = sum_i input[i * cols + j]  for j in [0, cols)
+    ; Zero the output first
+    mov rdi, [r14 + TENSOR_DATA]
+    mov eax, [r12 + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT64
+    je .axis0_zero_f64
+
+    ; f32: zero cols floats
+    xor eax, eax
+    mov rcx, rbx
+.axis0_zero_f32:
+    mov dword [rdi + rcx*4 - 4], 0
+    dec rcx
+    jnz .axis0_zero_f32
+
+    ; Accumulate each row
+    mov rsi, [r12 + TENSOR_DATA]
+    xor rcx, rcx                    ; row index
+.axis0_row_f32:
+    cmp rcx, r15
+    jge .done
+    xor rdx, rdx                    ; col index
+.axis0_col_f32:
+    cmp rdx, rbx
+    jge .axis0_next_row_f32
+    movss xmm0, [rsi]
+    mov rdi, [r14 + TENSOR_DATA]
+    addss xmm0, [rdi + rdx*4]
+    movss [rdi + rdx*4], xmm0
+    add rsi, 4
+    inc rdx
+    jmp .axis0_col_f32
+.axis0_next_row_f32:
+    inc rcx
+    jmp .axis0_row_f32
+
+.axis0_zero_f64:
+    xor eax, eax
+    mov rcx, rbx
+.axis0_zero_f64_loop:
+    mov qword [rdi + rcx*8 - 8], 0
+    dec rcx
+    jnz .axis0_zero_f64_loop
+
+    mov rsi, [r12 + TENSOR_DATA]
+    xor rcx, rcx
+.axis0_row_f64:
+    cmp rcx, r15
+    jge .done
+    xor rdx, rdx
+.axis0_col_f64:
+    cmp rdx, rbx
+    jge .axis0_next_row_f64
+    movsd xmm0, [rsi]
+    mov rdi, [r14 + TENSOR_DATA]
+    addsd xmm0, [rdi + rdx*8]
+    movsd [rdi + rdx*8], xmm0
+    add rsi, 8
+    inc rdx
+    jmp .axis0_col_f64
+.axis0_next_row_f64:
+    inc rcx
+    jmp .axis0_row_f64
+
+; ---- axis=1: sum cols, output has 'rows' elements ----
+.sum_axis1:
+    ; out[i] = sum_j input[i * cols + j]  for i in [0, rows)
+    mov rsi, [r12 + TENSOR_DATA]
+    mov rdi, [r14 + TENSOR_DATA]
+    mov eax, [r12 + TENSOR_DTYPE]
+    cmp eax, DT_FLOAT64
+    je .axis1_f64
+
+    ; f32 path
+    xor rcx, rcx                    ; row index
+.axis1_row_f32:
+    cmp rcx, r15
+    jge .done
+    vxorps xmm0, xmm0, xmm0        ; row accumulator
+    xor rdx, rdx                    ; col index
+.axis1_col_f32:
+    cmp rdx, rbx
+    jge .axis1_store_f32
+    addss xmm0, [rsi]
+    add rsi, 4
+    inc rdx
+    jmp .axis1_col_f32
+.axis1_store_f32:
+    movss [rdi], xmm0
+    add rdi, 4
+    inc rcx
+    jmp .axis1_row_f32
+
+.axis1_f64:
+    xor rcx, rcx
+.axis1_row_f64:
+    cmp rcx, r15
+    jge .done
+    vxorpd xmm0, xmm0, xmm0
+    xor rdx, rdx
+.axis1_col_f64:
+    cmp rdx, rbx
+    jge .axis1_store_f64
+    addsd xmm0, [rsi]
+    add rsi, 8
+    inc rdx
+    jmp .axis1_col_f64
+.axis1_store_f64:
+    movsd [rdi], xmm0
+    add rdi, 8
+    inc rcx
+    jmp .axis1_row_f64
     
 .sum_all:
     ; Sum all elements

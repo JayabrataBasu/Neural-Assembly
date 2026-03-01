@@ -1,4 +1,4 @@
-# Neural Assembly Framework — v2.0.0
+# Neural Assembly Framework — v2.1.0
 
 A deep learning framework with its core written in x86-64 assembly and C, plus thin Python bindings.
 
@@ -111,14 +111,31 @@ This project implements a complete neural network training framework in x86-64 a
   - MinMax and percentile calibration
   - Quantized int8 matrix multiply (int32 accumulation)
 
+- **Activation Functions** (`activations_c.c`) — *NEW in v2.1*
+  - 11 C-native activations operating directly on tensor data (float32/float64)
+  - tanh, gelu, leaky\_relu, elu, selu, swish, mish, hardswish, softplus, hardtanh
+  - Macro-generated to keep code DRY; replaces broken assembly node-level wrappers
+
+- **Optimizers** (`optimizers_c.c`) — *NEW in v2.1*
+  - Python-friendly C optimizers: SGD (with momentum), Adam, AdamW (decoupled weight decay)
+  - Lazy moment-buffer allocation on first step; params/grads passed at step time
+  - Supports float32 and float64; replaces assembly optimizers whose calling convention was incompatible with ctypes
+
+- **LSTM & GRU** (`rnn.c`) — *NEW in v2.1*
+  - LSTM: 4-gate (input, forget, cell, output) with Xavier init, forget-gate bias = 1.0
+  - GRU: 3-gate (reset, update, new) with Xavier init
+  - Batched forward pass; data in `[batch, seq_len, feature]` float64 layout
+  - Weight / bias accessors for downstream optimization
+
 ### Python Layer (`pyneural/`)
 
 Thin wrappers that marshal arguments to C/assembly — all heavy math stays below.
 
 - **Layers**: Linear, Conv2D, MaxPool2D, BatchNorm1d, LayerNorm, Embedding, Dropout
-- **Activations**: ReLU, Sigmoid, Tanh, Softmax
+- **Activations**: ReLU, Sigmoid, Tanh, Softmax, GELU, LeakyReLU, ELU, SELU, Swish, Mish, HardSwish, Softplus, HardTanh
 - **Losses**: MSELoss, CrossEntropyLoss, LabelSmoothingCrossEntropy
 - **Optimizers**: SGD, Adam, AdamW (with gradient clipping)
+- **Recurrent Layers**: LSTM, GRU
 - **Schedulers**: OneCycleLR (warmup + cosine annealing), LRFinder (exponential sweep)
 - **Checkpoint**: save/load full model state (epoch, loss, LR, all parameters)
 - **Metrics**: ROC-AUC score, confusion matrix, precision/recall/F1
@@ -397,6 +414,9 @@ Neural Assembly/
 ├── tb_logger.c         # TensorBoard TFEvent logging
 ├── pruning.c           # Model pruning (magnitude, structured)
 ├── quantize.c          # INT8 quantization
+├── activations_c.c     # 11 C-native activation functions (v2.1)
+├── optimizers_c.c      # SGD / Adam / AdamW in C (v2.1)
+├── rnn.c               # LSTM + GRU recurrent layers (v2.1)
 │
 ├── neural_api.h        # Public C header for all exports
 ├── Makefile            # Build system (asm + C → libneural.so)
@@ -418,15 +438,21 @@ Neural Assembly/
 │   ├── metrics.py      # ROC-AUC
 │   ├── tb_logger.py    # SummaryWriter
 │   ├── pruning.py      # Pruner
-│   └── quantize.py     # Quantizer
+│   ├── pruning.py      # Pruner
+│   ├── quantize.py     # Quantizer
+│   ├── activations.py  # GELU, LeakyReLU, ELU, SELU, Swish, Mish, … (v2.1)
+│   └── rnn.py          # LSTM, GRU (v2.1)
 │
 ├── tools/              # Test suites, data generators, utilities
 │   ├── run_validation_suite.py
 │   ├── test_conv2d.py        # 83 tests
+│   ├── test_activations.py   # 80 tests  (v2.1)
+│   ├── test_rnn.py           # 75 tests  (v2.1)
 │   ├── test_fuzzy.py         # 65 tests
 │   ├── test_lr_finder.py     # 39 tests
 │   ├── test_transforms.py    # 37 tests
 │   ├── test_onecycle.py      # 35 tests
+│   ├── test_adamw.py         # 28 tests  (v2.1)
 │   ├── test_train_eval_mode.py # 26 tests
 │   ├── test_batchnorm.py     # 22 tests
 │   ├── test_embedding.py     # 19 tests
@@ -454,6 +480,7 @@ Neural Assembly/
 - Assembly core uses single-precision (float32); C modules use double (float64)
 - Maximum 4 tensor dimensions
 - No GPU support (CPU SIMD only)
+- LSTM/GRU forward-only (no backward pass yet)
 
 ## Performance Considerations
 
@@ -495,7 +522,7 @@ This is an educational project demonstrating low-level ML implementation. Contri
 - Additional layer types
 - Better documentation
 
-## Feature Roadmap — All Complete as of v2.0.0
+## Feature Roadmap — All Complete as of v2.1.0
 
 Every feature below has a dedicated test suite and passes the full 23-check validation.
 
@@ -546,7 +573,14 @@ Every feature below has a dedicated test suite and passes the full 23-check vali
 - ✅ **Conv2D** — Im2col + GEMM forward/backward, Kaiming init, bias support (C, 83 tests combined)
 - ✅ **MaxPool2D** — Argmax-mask forward + scatter backward (C)
 
-**Total test count: 408 across 14 dedicated test suites, plus validation and integration tests.**
+### Activations, Optimizers & Recurrent Layers (v2.1)
+
+- ✅ **C Activation Functions** — 11 activations in C (tanh, gelu, leaky\_relu, elu, selu, swish, mish, hardswish, softplus, hardtanh), replacing broken assembly node-level wrappers (80 tests)
+- ✅ **C Optimizers** — SGD/Adam/AdamW rewritten in C with Python-friendly API, lazy moment allocation (28 tests)
+- ✅ **LSTM** — 4-gate recurrent layer (input, forget, cell, output), Xavier init, forget-gate bias = 1.0 (C, 75 tests combined)
+- ✅ **GRU** — 3-gate recurrent layer (reset, update, new), Xavier init (C)
+
+**Total test count: 591 across 17 dedicated test suites, plus validation and integration tests.**
 
 ## License
 

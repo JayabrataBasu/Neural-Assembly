@@ -137,6 +137,23 @@ section .data
     float_format:   db "%.4f", 0
     int_format:     db "%d", 0
 
+    ; Config summary strings
+    cfg_hdr:        db "  Configuration:", 10, 0
+    cfg_input:      db "    Input size:    ", 0
+    cfg_hidden:     db "    Hidden size:   ", 0
+    cfg_output:     db "    Output size:   ", 0
+    cfg_layers:     db "    Hidden layers: ", 0
+    cfg_epochs:     db "    Epochs:        ", 0
+    cfg_batch:      db "    Batch size:    ", 0
+    cfg_lr:         db "    Learning rate: ", 0
+    cfg_optim:      db "    Optimizer:     ", 0
+    cfg_sgd_str:    db "SGD", 10, 0
+    cfg_adam_str:   db "Adam", 10, 0
+
+    ; Timing strings
+    msg_time:       db "[*] Training time: ", 0
+    msg_seconds:    db " seconds", 10, 0
+
 section .bss
     ; Command line arguments
     argc:           resq 1
@@ -903,7 +920,90 @@ cmd_test_handler:
 print_config_summary:
     push rbp
     mov rbp, rsp
-    ; TODO: Print key config values
+    push rbx
+    sub rsp, 8
+
+    mov rbx, [rel config_ptr]
+    test rbx, rbx
+    jz .cfg_done
+
+    ; Header
+    lea rdi, [rel cfg_hdr]
+    call print_string
+
+    ; Input size
+    lea rdi, [rel cfg_input]
+    call print_string
+    movsxd rdi, dword [rbx + OFF_INPUT_SIZE]
+    call print_int
+    lea rdi, [rel msg_newline]
+    call print_string
+
+    ; Hidden size
+    lea rdi, [rel cfg_hidden]
+    call print_string
+    movsxd rdi, dword [rbx + OFF_HIDDEN_SIZE]
+    call print_int
+    lea rdi, [rel msg_newline]
+    call print_string
+
+    ; Output size
+    lea rdi, [rel cfg_output]
+    call print_string
+    movsxd rdi, dword [rbx + OFF_OUTPUT_SIZE]
+    call print_int
+    lea rdi, [rel msg_newline]
+    call print_string
+
+    ; Num hidden layers
+    lea rdi, [rel cfg_layers]
+    call print_string
+    movsxd rdi, dword [rbx + OFF_NUM_LAYERS]
+    call print_int
+    lea rdi, [rel msg_newline]
+    call print_string
+
+    ; Epochs
+    lea rdi, [rel cfg_epochs]
+    call print_string
+    movsxd rdi, dword [rbx + OFF_EPOCHS]
+    call print_int
+    lea rdi, [rel msg_newline]
+    call print_string
+
+    ; Batch size
+    lea rdi, [rel cfg_batch]
+    call print_string
+    movsxd rdi, dword [rbx + OFF_BATCH_SIZE]
+    call print_int
+    lea rdi, [rel msg_newline]
+    call print_string
+
+    ; Learning rate (float32 -> double for print_float)
+    lea rdi, [rel cfg_lr]
+    call print_string
+    movss xmm0, [rbx + OFF_LEARNING_RATE]
+    cvtss2sd xmm0, xmm0
+    call print_float
+    lea rdi, [rel msg_newline]
+    call print_string
+
+    ; Optimizer type
+    lea rdi, [rel cfg_optim]
+    call print_string
+    mov eax, [rbx + OFF_OPTIMIZER_TYPE]
+    cmp eax, 1
+    je .cfg_print_adam
+    lea rdi, [rel cfg_sgd_str]
+    jmp .cfg_print_opt
+.cfg_print_adam:
+    lea rdi, [rel cfg_adam_str]
+.cfg_print_opt:
+    call print_string
+
+.cfg_done:
+    add rsp, 8
+    pop rbx
     pop rbp
     ret
 
@@ -2778,8 +2878,10 @@ train_epoch:
     movss [rbp - 80], xmm0
     
 .do_backward:
-    ; Set loss gradient to 1.0 for backward pass
-    ; TODO: loss node's gradient should be initialized
+    ; Loss gradient initialization is handled inside backward():
+    ; it checks the loss node's NODE_GRAD field — if NULL it allocates
+    ; a matching-shape tensor and fills it with 1.0; if non-NULL it
+    ; tensor_fill's the existing grad with 1.0. Nothing needed here.
     
     ; Backward pass - pass loss node, not model!
     mov rdi, [rbp - 88]         ; loss node
@@ -3712,19 +3814,32 @@ run_gradient_checks:
 print_timing:
     push rbp
     mov rbp, rsp
+    sub rsp, 16
     
-    ; Calculate elapsed time
+    ; Calculate elapsed time in nanoseconds
     mov rax, [rel end_time]
     sub rax, [rel start_time]
     
-    ; Convert nanoseconds to seconds
-    mov rcx, 1000000000
-    xor edx, edx
-    div rcx
+    ; Convert nanoseconds to seconds as a double for precision
+    cvtsi2sd xmm0, rax
+    mov rax, 1000000000
+    cvtsi2sd xmm1, rax
+    divsd xmm0, xmm1
+    movsd [rbp - 8], xmm0       ; save elapsed_seconds
     
-    ; Print elapsed seconds
-    ; TODO: format and print
+    ; Print label
+    lea rdi, [rel msg_time]
+    call print_string
     
+    ; Print elapsed seconds (as double in xmm0)
+    movsd xmm0, [rbp - 8]
+    call print_float
+    
+    ; Print " seconds\n"
+    lea rdi, [rel msg_seconds]
+    call print_string
+    
+    add rsp, 16
     pop rbp
     ret
 
