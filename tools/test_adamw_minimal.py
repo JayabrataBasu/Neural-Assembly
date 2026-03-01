@@ -6,8 +6,10 @@ Minimal test to verify AdamW optimizer creation and basic functionality
 import ctypes
 import os
 
-# Load the neural assembly library
-lib_path = os.path.join(os.path.dirname(__file__), 'libneural.so')
+# Load the neural assembly library from project root
+base_dir = os.path.abspath(os.path.dirname(__file__))
+root_dir = os.path.abspath(os.path.join(base_dir, '..'))
+lib_path = os.path.join(root_dir, 'libneural.so')
 lib = ctypes.CDLL(lib_path)
 
 # C optimizer API (optimizers_c.c)

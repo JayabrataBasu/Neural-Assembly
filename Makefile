@@ -26,6 +26,10 @@ endif
 ASM_DIR = src/asm
 C_DIR = src/c
 
+# Output directories for compiled objects
+OBJ_DIR = build/obj
+PIC_DIR = build/pic
+
 # Assembly source files (order matters for dependencies)
 ASM_SRCS = $(ASM_DIR)/mem.asm \
            $(ASM_DIR)/utils.asm \
@@ -90,14 +94,14 @@ LIB_ASM_SRCS = $(ASM_DIR)/mem.asm \
 # Library C sources (same as C_SRCS — all go into shared lib)
 LIB_C_SRCS = $(C_SRCS)
 
-# Object files — main binary
-ASM_OBJS = $(patsubst $(ASM_DIR)/%.asm,%.o,$(ASM_SRCS))
-C_OBJS = $(patsubst $(C_DIR)/%.c,%.o,$(C_SRCS))
+# Object files — main binary (placed under $(OBJ_DIR))
+ASM_OBJS = $(patsubst $(ASM_DIR)/%.asm,$(OBJ_DIR)/%.o,$(ASM_SRCS))
+C_OBJS = $(patsubst $(C_DIR)/%.c,$(OBJ_DIR)/%.o,$(C_SRCS))
 OBJS = $(ASM_OBJS) $(C_OBJS)
 
-# Object files — shared library (PIC)
-LIB_ASM_PIC = $(patsubst $(ASM_DIR)/%.asm,%.pic.o,$(LIB_ASM_SRCS))
-LIB_C_PIC = $(patsubst $(C_DIR)/%.c,%.pic.o,$(LIB_C_SRCS))
+# Object files — shared library (PIC) stored under $(PIC_DIR)
+LIB_ASM_PIC = $(patsubst $(ASM_DIR)/%.asm,$(PIC_DIR)/%.pic.o,$(LIB_ASM_SRCS))
+LIB_C_PIC = $(patsubst $(C_DIR)/%.c,$(PIC_DIR)/%.pic.o,$(LIB_C_SRCS))
 PIC_OBJS = $(LIB_ASM_PIC) $(LIB_C_PIC)
 
 # Phony targets
@@ -121,20 +125,24 @@ $(TARGET): $(OBJS)
 $(SHARED_LIB): $(PIC_OBJS)
 	$(CC) $(LDFLAGS_SHARED) -fPIC -o $@ $^
 
-# Assemble each source file (non-PIC for main binary)
-%.o: $(ASM_DIR)/%.asm
+# Assemble each source file (non-PIC for main binary) into OBJ_DIR
+$(OBJ_DIR)/%.o: $(ASM_DIR)/%.asm
+	@mkdir -p $(dir $@)
 	$(NASM) $(NASMFLAGS) -o $@ $<
 
-# Assemble PIC objects for shared library
-%.pic.o: $(ASM_DIR)/%.asm
+# Assemble PIC objects for shared library into PIC_DIR
+$(PIC_DIR)/%.pic.o: $(ASM_DIR)/%.asm
+	@mkdir -p $(dir $@)
 	$(NASM) $(NASMFLAGS_PIC) -o $@ $<
 
 # Compile C source files (non-PIC for main binary)
-%.o: $(C_DIR)/%.c
+$(OBJ_DIR)/%.o: $(C_DIR)/%.c
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Compile C source files (PIC for shared library)
-%.pic.o: $(C_DIR)/%.c
+$(PIC_DIR)/%.pic.o: $(C_DIR)/%.c
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_PIC) -c -o $@ $<
 
 # Debug build with extra symbols
@@ -143,7 +151,9 @@ debug: clean all
 
 # Clean build artifacts
 clean:
-	rm -f *.o *.pic.o *.lst $(TARGET) $(SHARED_LIB)
+	rm -f $(TARGET) $(SHARED_LIB)
+	rm -rf build
+	rm -f *.lst
 
 # Install shared library (requires sudo)
 install: $(SHARED_LIB)

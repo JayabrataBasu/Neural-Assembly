@@ -178,8 +178,8 @@ def run_compatibility_checks(results: List[CheckResult]) -> None:
 
 def build_test_plan(tier: str) -> List[Tuple[str, str, bool]]:
     py = _venv_python()
-    adamw_simple_retry = f"for i in 1 2 3; do {py} test_adamw_simple.py && exit 0; done; exit 1"
-    adamw_minimal_retry = f"for i in 1 2 3; do {py} test_adamw_minimal.py && exit 0; done; exit 1"
+    adamw_simple_retry = f"for i in 1 2 3; do {py} tools/test_adamw_simple.py && exit 0; done; exit 1"
+    adamw_minimal_retry = f"for i in 1 2 3; do {py} tools/test_adamw_minimal.py && exit 0; done; exit 1"
 
     plan: List[Tuple[str, str, bool]] = [
         ("build:exe", "make -j1", True),
@@ -209,7 +209,7 @@ def build_test_plan(tier: str) -> List[Tuple[str, str, bool]]:
                 ),
                 ("py:adamw_simple", adamw_simple_retry, False),
                 ("py:adamw_minimal", adamw_minimal_retry, True),
-                ("py:convergence", f"{py} test_convergence.py", True),
+                ("py:convergence", f"{py} tools/test_convergence.py", True),
                 (
                     "train:xor",
                     "./neural_framework train configs/xor_config.ini /tmp/na_xor_model.bin",
