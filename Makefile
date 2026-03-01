@@ -22,75 +22,82 @@ ifneq ("$(wildcard .neuasm/bin/python)","")
 PYTHON := ./.neuasm/bin/python
 endif
 
+# Source directories
+ASM_DIR = src/asm
+C_DIR = src/c
+
 # Assembly source files (order matters for dependencies)
-ASM_SRCS = mem.asm \
-           utils.asm \
-           error.asm \
-           simd.asm \
-           tensor.asm \
-           math_kernels.asm \
-           autograd.asm \
-           activations.asm \
-           nn_layers.asm \
-           losses.asm \
-           optimizers.asm \
-           dataset.asm \
-           model_io.asm \
-           config_parser.asm \
-           threads.asm \
-           training_ops.asm \
-           tests.asm \
-           verify.asm \
-           compat.asm \
-           main.asm
+ASM_SRCS = $(ASM_DIR)/mem.asm \
+           $(ASM_DIR)/utils.asm \
+           $(ASM_DIR)/error.asm \
+           $(ASM_DIR)/simd.asm \
+           $(ASM_DIR)/tensor.asm \
+           $(ASM_DIR)/math_kernels.asm \
+           $(ASM_DIR)/autograd.asm \
+           $(ASM_DIR)/activations.asm \
+           $(ASM_DIR)/nn_layers.asm \
+           $(ASM_DIR)/losses.asm \
+           $(ASM_DIR)/optimizers.asm \
+           $(ASM_DIR)/dataset.asm \
+           $(ASM_DIR)/model_io.asm \
+           $(ASM_DIR)/config_parser.asm \
+           $(ASM_DIR)/threads.asm \
+           $(ASM_DIR)/training_ops.asm \
+           $(ASM_DIR)/tests.asm \
+           $(ASM_DIR)/verify.asm \
+           $(ASM_DIR)/compat.asm \
+           $(ASM_DIR)/main.asm
 
 # C source files (complex features best written in C)
-C_SRCS = tb_logger.c \
-         pruning.c \
-         quantize.c \
-         batchnorm.c \
-         metrics_losses.c \
-         transforms.c \
-         embedding.c \
-         fuzzy.c \
-         conv2d.c \
-         activations_c.c \
-         optimizers_c.c \
-         rnn.c
+C_SRCS = $(C_DIR)/tb_logger.c \
+         $(C_DIR)/pruning.c \
+         $(C_DIR)/quantize.c \
+         $(C_DIR)/batchnorm.c \
+         $(C_DIR)/metrics_losses.c \
+         $(C_DIR)/transforms.c \
+         $(C_DIR)/embedding.c \
+         $(C_DIR)/fuzzy.c \
+         $(C_DIR)/conv2d.c \
+         $(C_DIR)/pooling.c \
+         $(C_DIR)/tensor_ops.c \
+         $(C_DIR)/transformer.c \
+         $(C_DIR)/activations_c.c \
+         $(C_DIR)/optimizers_c.c \
+         $(C_DIR)/rnn.c
 
 # Library assembly sources (excluding main.asm for shared library)
-LIB_ASM_SRCS = mem.asm \
-               utils.asm \
-               error.asm \
-               simd.asm \
-               tensor.asm \
-               math_kernels.asm \
-               autograd.asm \
-               activations.asm \
-               nn_layers.asm \
-               losses.asm \
-               optimizers.asm \
-               dataset.asm \
-               model_io.asm \
-               config_parser.asm \
-               threads.asm \
-               training_ops.asm \
-               tests.asm \
-               verify.asm \
-               compat.asm \
-               neural_api.asm
+LIB_ASM_SRCS = $(ASM_DIR)/mem.asm \
+               $(ASM_DIR)/utils.asm \
+               $(ASM_DIR)/error.asm \
+               $(ASM_DIR)/simd.asm \
+               $(ASM_DIR)/tensor.asm \
+               $(ASM_DIR)/math_kernels.asm \
+               $(ASM_DIR)/autograd.asm \
+               $(ASM_DIR)/activations.asm \
+               $(ASM_DIR)/nn_layers.asm \
+               $(ASM_DIR)/losses.asm \
+               $(ASM_DIR)/optimizers.asm \
+               $(ASM_DIR)/dataset.asm \
+               $(ASM_DIR)/model_io.asm \
+               $(ASM_DIR)/config_parser.asm \
+               $(ASM_DIR)/threads.asm \
+               $(ASM_DIR)/training_ops.asm \
+               $(ASM_DIR)/tests.asm \
+               $(ASM_DIR)/verify.asm \
+               $(ASM_DIR)/compat.asm \
+               $(ASM_DIR)/neural_api.asm
 
 # Library C sources (same as C_SRCS — all go into shared lib)
 LIB_C_SRCS = $(C_SRCS)
 
 # Object files — main binary
-ASM_OBJS = $(ASM_SRCS:.asm=.o)
-C_OBJS = $(C_SRCS:.c=.o)
+ASM_OBJS = $(patsubst $(ASM_DIR)/%.asm,%.o,$(ASM_SRCS))
+C_OBJS = $(patsubst $(C_DIR)/%.c,%.o,$(C_SRCS))
 OBJS = $(ASM_OBJS) $(C_OBJS)
 
 # Object files — shared library (PIC)
-LIB_ASM_PIC = $(LIB_ASM_SRCS:.asm=.pic.o)
-LIB_C_PIC = $(LIB_C_SRCS:.c=.pic.o)
+LIB_ASM_PIC = $(patsubst $(ASM_DIR)/%.asm,%.pic.o,$(LIB_ASM_SRCS))
+LIB_C_PIC = $(patsubst $(C_DIR)/%.c,%.pic.o,$(LIB_C_SRCS))
 PIC_OBJS = $(LIB_ASM_PIC) $(LIB_C_PIC)
 
 # Phony targets
@@ -115,19 +122,19 @@ $(SHARED_LIB): $(PIC_OBJS)
 	$(CC) $(LDFLAGS_SHARED) -fPIC -o $@ $^
 
 # Assemble each source file (non-PIC for main binary)
-%.o: %.asm
+%.o: $(ASM_DIR)/%.asm
 	$(NASM) $(NASMFLAGS) -o $@ $<
 
 # Assemble PIC objects for shared library
-%.pic.o: %.asm
+%.pic.o: $(ASM_DIR)/%.asm
 	$(NASM) $(NASMFLAGS_PIC) -o $@ $<
 
 # Compile C source files (non-PIC for main binary)
-%.o: %.c
+%.o: $(C_DIR)/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Compile C source files (PIC for shared library)
-%.pic.o: %.c
+%.pic.o: $(C_DIR)/%.c
 	$(CC) $(CFLAGS_PIC) -c -o $@ $<
 
 # Debug build with extra symbols
@@ -191,16 +198,16 @@ help:
 	@echo "  make lib && python3 -c 'import pyneural'"
 
 # Dependencies
-mem.o: mem.asm
-utils.o: utils.asm
-tensor.o: tensor.asm
-math_kernels.o: math_kernels.asm
-autograd.o: autograd.asm
-activations.o: activations.asm
-nn_layers.o: nn_layers.asm
-losses.o: losses.asm
-optimizers.o: optimizers.asm
-dataset.o: dataset.asm
-model_io.o: model_io.asm
-config_parser.o: config_parser.asm
-main.o: main.asm 
+mem.o: $(ASM_DIR)/mem.asm
+utils.o: $(ASM_DIR)/utils.asm
+tensor.o: $(ASM_DIR)/tensor.asm
+math_kernels.o: $(ASM_DIR)/math_kernels.asm
+autograd.o: $(ASM_DIR)/autograd.asm
+activations.o: $(ASM_DIR)/activations.asm
+nn_layers.o: $(ASM_DIR)/nn_layers.asm
+losses.o: $(ASM_DIR)/losses.asm
+optimizers.o: $(ASM_DIR)/optimizers.asm
+dataset.o: $(ASM_DIR)/dataset.asm
+model_io.o: $(ASM_DIR)/model_io.asm
+config_parser.o: $(ASM_DIR)/config_parser.asm
+main.o: $(ASM_DIR)/main.asm

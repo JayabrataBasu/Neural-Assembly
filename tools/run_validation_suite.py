@@ -195,6 +195,7 @@ def build_test_plan(tier: str) -> List[Tuple[str, str, bool]]:
             [
                 ("py:autograd", f"{py} tools/test_autograd.py", True),
                 ("py:dataloader", f"{py} tools/test_dataloader.py", True),
+                ("py:batch11_13_wrappers", f"{py} tools/test_batch11_13_wrappers.py", True),
                 ("py:grad_clip", f"{py} tools/test_gradient_clipping.py", False),
                 (
                     "py:grad_clip_comprehensive",

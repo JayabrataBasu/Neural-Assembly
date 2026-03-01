@@ -89,6 +89,9 @@ from .fuzzy import (
     defuzz_centroid, defuzz_bisector, defuzz_mom,
 )
 from .conv import Conv2D, MaxPool2D, calc_output_size
+from .pooling import AvgPool2D, Upsample2D
+from .tensor_ops import concat_2d, split_2d, pad_2d, transpose_2d
+from .attention import scaled_dot_product_attention, transformer_block
 from .activations import (
     GELU, LeakyReLU, ELU, SELU, Swish, Mish, HardSwish, Softplus, HardTanh,
 )
@@ -206,7 +209,17 @@ __all__ = [
     # Convolution / Pooling
     "Conv2D",
     "MaxPool2D",
+    "AvgPool2D",
+    "Upsample2D",
     "calc_output_size",
+    # Tensor ops
+    "concat_2d",
+    "split_2d",
+    "pad_2d",
+    "transpose_2d",
+    # Attention / Transformer
+    "scaled_dot_product_attention",
+    "transformer_block",
     # Extended Activations
     "GELU",
     "LeakyReLU",

@@ -1242,6 +1242,103 @@ int  maxpool2d_backward(const double *grad_output,
                         int64_t out_h, int64_t out_w,
                         double *grad_input);
 
+/* ── AvgPool2D + Upsample (pooling.c) ───────────────────────────── */
+
+int  avgpool2d_forward(const double *input,
+                       int64_t batch, int64_t channels,
+                       int64_t in_h, int64_t in_w,
+                       int64_t pool_h, int64_t pool_w,
+                       int64_t stride, int64_t padding,
+                       double *output);
+int  avgpool2d_backward(const double *grad_output,
+                        int64_t batch, int64_t channels,
+                        int64_t in_h, int64_t in_w,
+                        int64_t pool_h, int64_t pool_w,
+                        int64_t stride, int64_t padding,
+                        double *grad_input);
+
+int  upsample2d_nearest_forward(const double *input,
+                                int64_t batch, int64_t channels,
+                                int64_t in_h, int64_t in_w,
+                                int64_t scale_h, int64_t scale_w,
+                                double *output);
+int  upsample2d_nearest_backward(const double *grad_output,
+                                 int64_t batch, int64_t channels,
+                                 int64_t in_h, int64_t in_w,
+                                 int64_t scale_h, int64_t scale_w,
+                                 double *grad_input);
+
+/* ── Tensor Ops: concat / split / pad / transpose (tensor_ops.c) ── */
+
+int  tensor_concat_2d(const double *a,
+                      const double *b,
+                      int64_t rows_a, int64_t cols_a,
+                      int64_t rows_b, int64_t cols_b,
+                      int64_t axis,
+                      double *out,
+                      int64_t *out_rows,
+                      int64_t *out_cols);
+int  tensor_split_2d(const double *in,
+                     int64_t rows, int64_t cols,
+                     int64_t axis,
+                     int64_t split_index,
+                     double *out_a,
+                     double *out_b,
+                     int64_t *rows_a,
+                     int64_t *cols_a,
+                     int64_t *rows_b,
+                     int64_t *cols_b);
+int  tensor_pad_2d(const double *in,
+                   int64_t in_rows,
+                   int64_t in_cols,
+                   int64_t pad_top,
+                   int64_t pad_bottom,
+                   int64_t pad_left,
+                   int64_t pad_right,
+                   double pad_value,
+                   double *out,
+                   int64_t *out_rows,
+                   int64_t *out_cols);
+int  tensor_transpose2d_array(const double *in,
+                              int64_t rows,
+                              int64_t cols,
+                              double *out);
+
+/* ── Attention + Transformer block (transformer.c) ───────────────── */
+
+int  attention_scaled_dot_product(const double *q,
+                                  const double *k,
+                                  const double *v,
+                                  const double *mask,
+                                  int64_t batch,
+                                  int64_t heads,
+                                  int64_t seq_q,
+                                  int64_t seq_kv,
+                                  int64_t d_k,
+                                  int64_t d_v,
+                                  double *out,
+                                  double *attn_weights);
+
+int  transformer_block_forward(const double *x,
+                               int64_t batch,
+                               int64_t seq_len,
+                               int64_t d_model,
+                               int64_t d_ff,
+                               const double *w_q,
+                               const double *w_k,
+                               const double *w_v,
+                               const double *w_o,
+                               const double *b_q,
+                               const double *b_k,
+                               const double *b_v,
+                               const double *b_o,
+                               const double *w1,
+                               const double *b1,
+                               const double *w2,
+                               const double *b2,
+                               double eps,
+                               double *out);
+
 #ifdef __cplusplus
 }
 #endif

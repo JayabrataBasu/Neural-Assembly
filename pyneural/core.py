@@ -1210,6 +1210,155 @@ _lib.maxpool2d_backward.argtypes = [
     ctypes.c_void_p,  # double* grad_input
 ]
 
+# ── AvgPool2D + Upsample (pooling.c) ─────────────────────────────
+
+_lib.avgpool2d_forward.restype = ctypes.c_int
+_lib.avgpool2d_forward.argtypes = [
+    ctypes.c_void_p,  # const double* input
+    ctypes.c_int64,   # batch
+    ctypes.c_int64,   # channels
+    ctypes.c_int64,   # in_h
+    ctypes.c_int64,   # in_w
+    ctypes.c_int64,   # pool_h
+    ctypes.c_int64,   # pool_w
+    ctypes.c_int64,   # stride
+    ctypes.c_int64,   # padding
+    ctypes.c_void_p,  # double* output
+]
+
+_lib.avgpool2d_backward.restype = ctypes.c_int
+_lib.avgpool2d_backward.argtypes = [
+    ctypes.c_void_p,  # const double* grad_output
+    ctypes.c_int64,   # batch
+    ctypes.c_int64,   # channels
+    ctypes.c_int64,   # in_h
+    ctypes.c_int64,   # in_w
+    ctypes.c_int64,   # pool_h
+    ctypes.c_int64,   # pool_w
+    ctypes.c_int64,   # stride
+    ctypes.c_int64,   # padding
+    ctypes.c_void_p,  # double* grad_input
+]
+
+_lib.upsample2d_nearest_forward.restype = ctypes.c_int
+_lib.upsample2d_nearest_forward.argtypes = [
+    ctypes.c_void_p,  # const double* input
+    ctypes.c_int64,   # batch
+    ctypes.c_int64,   # channels
+    ctypes.c_int64,   # in_h
+    ctypes.c_int64,   # in_w
+    ctypes.c_int64,   # scale_h
+    ctypes.c_int64,   # scale_w
+    ctypes.c_void_p,  # double* output
+]
+
+_lib.upsample2d_nearest_backward.restype = ctypes.c_int
+_lib.upsample2d_nearest_backward.argtypes = [
+    ctypes.c_void_p,  # const double* grad_output
+    ctypes.c_int64,   # batch
+    ctypes.c_int64,   # channels
+    ctypes.c_int64,   # in_h
+    ctypes.c_int64,   # in_w
+    ctypes.c_int64,   # scale_h
+    ctypes.c_int64,   # scale_w
+    ctypes.c_void_p,  # double* grad_input
+]
+
+# ── Tensor Ops (tensor_ops.c) ─────────────────────────────────────
+
+_lib.tensor_concat_2d.restype = ctypes.c_int
+_lib.tensor_concat_2d.argtypes = [
+    ctypes.c_void_p,  # const double* a
+    ctypes.c_void_p,  # const double* b
+    ctypes.c_int64,   # rows_a
+    ctypes.c_int64,   # cols_a
+    ctypes.c_int64,   # rows_b
+    ctypes.c_int64,   # cols_b
+    ctypes.c_int64,   # axis
+    ctypes.c_void_p,  # double* out
+    ctypes.POINTER(ctypes.c_int64),  # out_rows
+    ctypes.POINTER(ctypes.c_int64),  # out_cols
+]
+
+_lib.tensor_split_2d.restype = ctypes.c_int
+_lib.tensor_split_2d.argtypes = [
+    ctypes.c_void_p,  # const double* in
+    ctypes.c_int64,   # rows
+    ctypes.c_int64,   # cols
+    ctypes.c_int64,   # axis
+    ctypes.c_int64,   # split_index
+    ctypes.c_void_p,  # double* out_a
+    ctypes.c_void_p,  # double* out_b
+    ctypes.POINTER(ctypes.c_int64),  # rows_a
+    ctypes.POINTER(ctypes.c_int64),  # cols_a
+    ctypes.POINTER(ctypes.c_int64),  # rows_b
+    ctypes.POINTER(ctypes.c_int64),  # cols_b
+]
+
+_lib.tensor_pad_2d.restype = ctypes.c_int
+_lib.tensor_pad_2d.argtypes = [
+    ctypes.c_void_p,  # const double* in
+    ctypes.c_int64,   # in_rows
+    ctypes.c_int64,   # in_cols
+    ctypes.c_int64,   # pad_top
+    ctypes.c_int64,   # pad_bottom
+    ctypes.c_int64,   # pad_left
+    ctypes.c_int64,   # pad_right
+    ctypes.c_double,  # pad_value
+    ctypes.c_void_p,  # double* out
+    ctypes.POINTER(ctypes.c_int64),  # out_rows
+    ctypes.POINTER(ctypes.c_int64),  # out_cols
+]
+
+_lib.tensor_transpose2d_array.restype = ctypes.c_int
+_lib.tensor_transpose2d_array.argtypes = [
+    ctypes.c_void_p,  # const double* in
+    ctypes.c_int64,   # rows
+    ctypes.c_int64,   # cols
+    ctypes.c_void_p,  # double* out
+]
+
+# ── Attention + Transformer (transformer.c) ───────────────────────
+
+_lib.attention_scaled_dot_product.restype = ctypes.c_int
+_lib.attention_scaled_dot_product.argtypes = [
+    ctypes.c_void_p,  # const double* q
+    ctypes.c_void_p,  # const double* k
+    ctypes.c_void_p,  # const double* v
+    ctypes.c_void_p,  # const double* mask (nullable)
+    ctypes.c_int64,   # batch
+    ctypes.c_int64,   # heads
+    ctypes.c_int64,   # seq_q
+    ctypes.c_int64,   # seq_kv
+    ctypes.c_int64,   # d_k
+    ctypes.c_int64,   # d_v
+    ctypes.c_void_p,  # double* out
+    ctypes.c_void_p,  # double* attn_weights (nullable)
+]
+
+_lib.transformer_block_forward.restype = ctypes.c_int
+_lib.transformer_block_forward.argtypes = [
+    ctypes.c_void_p,  # const double* x
+    ctypes.c_int64,   # batch
+    ctypes.c_int64,   # seq_len
+    ctypes.c_int64,   # d_model
+    ctypes.c_int64,   # d_ff
+    ctypes.c_void_p,  # const double* w_q
+    ctypes.c_void_p,  # const double* w_k
+    ctypes.c_void_p,  # const double* w_v
+    ctypes.c_void_p,  # const double* w_o
+    ctypes.c_void_p,  # const double* b_q
+    ctypes.c_void_p,  # const double* b_k
+    ctypes.c_void_p,  # const double* b_v
+    ctypes.c_void_p,  # const double* b_o
+    ctypes.c_void_p,  # const double* w1
+    ctypes.c_void_p,  # const double* b1
+    ctypes.c_void_p,  # const double* w2
+    ctypes.c_void_p,  # const double* b2
+    ctypes.c_double,  # eps
+    ctypes.c_void_p,  # double* out
+]
+
 
 def _check_error(result: int, operation: str = "operation"):
     """Check result code and raise exception if error."""
