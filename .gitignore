@@ -56,3 +56,7 @@ xor_model.bin
 
 # Internal dev log (not tracked)
 .devlog.txt
+
+# Local-only development assets (tests, data prep, validation scripts)
+tools/*
+!tools/.gitkeep

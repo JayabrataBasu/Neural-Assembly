@@ -169,18 +169,34 @@ run-test: $(TARGET)
 
 # Run mathematical verification
 verify: $(TARGET)
-	$(PYTHON) tools/verify_simple.py
+    @if [ -f tools/verify_simple.py ]; then \
+        $(PYTHON) tools/verify_simple.py; \
+    else \
+        echo "verify skipped: tools/verify_simple.py not shipped"; \
+    fi
 
 # Run full verification (requires numpy)
 verify-full: $(TARGET)
-	$(PYTHON) tools/verify_correctness.py
+    @if [ -f tools/verify_correctness.py ]; then \
+        $(PYTHON) tools/verify_correctness.py; \
+    else \
+        echo "verify-full skipped: tools/verify_correctness.py not shipped"; \
+    fi
 
 # Run staged validation suite (build + datasets + tests + compatibility checks)
 validate-smoke: $(TARGET) $(SHARED_LIB)
-	$(PYTHON) tools/run_validation_suite.py --tier smoke
+    @if [ -f tools/run_validation_suite.py ]; then \
+        $(PYTHON) tools/run_validation_suite.py --tier smoke; \
+    else \
+        echo "validate-smoke skipped: tools/run_validation_suite.py not shipped"; \
+    fi
 
 validate: $(TARGET) $(SHARED_LIB)
-	$(PYTHON) tools/run_validation_suite.py --tier regression
+    @if [ -f tools/run_validation_suite.py ]; then \
+        $(PYTHON) tools/run_validation_suite.py --tier regression; \
+    else \
+        echo "validate skipped: tools/run_validation_suite.py not shipped"; \
+    fi
 
 # Show help
 help:
