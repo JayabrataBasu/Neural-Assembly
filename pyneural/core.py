@@ -292,6 +292,19 @@ _lib.opt_get_lr.argtypes = [ctypes.c_void_p]
 _lib.opt_set_lr.restype = None
 _lib.opt_set_lr.argtypes = [ctypes.c_void_p, ctypes.c_double]
 
+try:
+    _lib.opt_state_bytes.restype = ctypes.c_int64
+    _lib.opt_state_bytes.argtypes = [ctypes.c_void_p]
+
+    _lib.opt_state_export.restype = ctypes.c_int
+    _lib.opt_state_export.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64]
+
+    _lib.opt_state_import.restype = ctypes.c_int
+    _lib.opt_state_import.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64]
+except AttributeError:
+    # Older libneural.so without optimizer state serialization symbols.
+    pass
+
 # RNN layers (rnn.c)
 _lib.lstm_create.restype = ctypes.c_void_p
 _lib.lstm_create.argtypes = [ctypes.c_int64, ctypes.c_int64]

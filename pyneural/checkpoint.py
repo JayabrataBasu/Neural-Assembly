@@ -1,10 +1,10 @@
 """
 Checkpoint save/resume for PyNeural models.
 
-Binary format (v2):
+Binary format (v3):
     HEADER  (16 bytes)
         magic       : 8 bytes  "NEURCKPT"
-        version     : uint32   2
+        version     : uint32   3
         num_tensors : uint32   count of weight tensors
 
     METADATA
@@ -12,7 +12,7 @@ Binary format (v2):
         best_loss   : float64
         lr          : float64
 
-    OPTIMIZER METADATA (v2)
+    OPTIMIZER METADATA (v2+)
         has_optimizer : uint8
         opt_type      : uint8   (0=none, 1=sgd, 2=adam, 3=adamw)
         reserved      : uint16
@@ -22,6 +22,10 @@ Binary format (v2):
         epsilon       : float64
         weight_decay  : float64
 
+    OPTIMIZER STATE BLOB (v3)
+        state_blob_size : uint64
+        state_blob      : bytes (opaque C optimizer state: moments, t, etc.)
+
     For each tensor:
         ndim        : uint32
         shape       : ndim × uint64
@@ -29,7 +33,8 @@ Binary format (v2):
         data        : numel × sizeof(dtype) bytes
 
 Backward compatibility:
-    - v1 checkpoints (without optimizer metadata) are still loadable.
+    - v1 checkpoints (without optimizer metadata) are loadable.
+    - v2 checkpoints (without opaque optimizer state blob) are loadable.
 """
 
 from __future__ import annotations
@@ -42,7 +47,7 @@ from typing import Optional
 from .core import _lib, NeuralDtype
 
 MAGIC = b"NEURCKPT"
-VERSION = 2
+VERSION = 3
 
 OPT_NONE = 0
 OPT_SGD = 1
@@ -89,6 +94,38 @@ def _apply_optimizer_payload(optimizer, opt_type: int, payload: tuple[float, flo
         optimizer.epsilon = epsilon
     if hasattr(optimizer, "weight_decay"):
         optimizer.weight_decay = weight_decay
+
+
+def _export_optimizer_state_blob(optimizer) -> bytes:
+    """Export opaque optimizer state bytes from C backend, if supported."""
+    if optimizer is None or not hasattr(optimizer, "_ptr") or not optimizer._ptr:
+        return b""
+    if not hasattr(_lib, "opt_state_bytes"):
+        return b""
+
+    nbytes = int(_lib.opt_state_bytes(optimizer._ptr))
+    if nbytes <= 0:
+        return b""
+
+    buf = (ctypes.c_uint8 * nbytes)()
+    ret = int(_lib.opt_state_export(optimizer._ptr, ctypes.cast(buf, ctypes.c_void_p), nbytes))
+    if ret != 0:
+        return b""
+    return bytes(buf)
+
+
+def _import_optimizer_state_blob(optimizer, blob: bytes) -> None:
+    """Import opaque optimizer state bytes into C backend, if supported."""
+    if not blob:
+        return
+    if optimizer is None or not hasattr(optimizer, "_ptr") or not optimizer._ptr:
+        return
+    if not hasattr(_lib, "opt_state_import"):
+        return
+
+    nbytes = len(blob)
+    buf = (ctypes.c_uint8 * nbytes).from_buffer_copy(blob)
+    _lib.opt_state_import(optimizer._ptr, ctypes.cast(buf, ctypes.c_void_p), nbytes)
 
 
 def _tensor_raw_bytes(tensor) -> bytes:
@@ -188,11 +225,17 @@ def save_checkpoint(
         f.write(struct.pack("<d", best_loss))
         f.write(struct.pack("<d", lr))
 
-        # Optimizer metadata (v2)
+        # Optimizer metadata (v2+)
         opt_type, momentum, beta1, beta2, epsilon, weight_decay = _optimizer_payload(optimizer)
         has_optimizer = 1 if opt_type != OPT_NONE else 0
         f.write(struct.pack("<BBH", has_optimizer, opt_type, 0))
         f.write(struct.pack("<ddddd", momentum, beta1, beta2, epsilon, weight_decay))
+
+        # Opaque optimizer state (v3)
+        state_blob = _export_optimizer_state_blob(optimizer)
+        f.write(struct.pack("<Q", len(state_blob)))
+        if state_blob:
+            f.write(state_blob)
 
         # Tensors
         for p in params:
@@ -235,8 +278,8 @@ def load_checkpoint(
             raise ValueError(f"Invalid checkpoint magic: {magic!r} (expected {MAGIC!r})")
 
         ver = struct.unpack("<I", f.read(4))[0]
-        if ver not in (1, VERSION):
-            raise ValueError(f"Unsupported checkpoint version {ver} (expected 1 or {VERSION})")
+        if ver not in (1, 2, VERSION):
+            raise ValueError(f"Unsupported checkpoint version {ver} (expected 1, 2, or {VERSION})")
 
         num_tensors = struct.unpack("<I", f.read(4))[0]
         if num_tensors != len(params):
@@ -251,6 +294,7 @@ def load_checkpoint(
         lr = struct.unpack("<d", f.read(8))[0]
 
         optimizer_type = OPT_NONE
+        state_blob = b""
         if ver >= 2:
             hdr = f.read(4)
             if len(hdr) < 4:
@@ -276,9 +320,22 @@ def load_checkpoint(
                         )
                 _apply_optimizer_payload(optimizer, optimizer_type, payload)
 
+        if ver >= 3:
+            size_raw = f.read(8)
+            if len(size_raw) < 8:
+                raise IOError("Truncated checkpoint: expected optimizer state blob size")
+            blob_size = struct.unpack("<Q", size_raw)[0]
+            if blob_size > 0:
+                state_blob = f.read(blob_size)
+                if len(state_blob) < blob_size:
+                    raise IOError("Truncated checkpoint: expected optimizer state blob")
+
         # Apply loaded LR to optimizer when provided.
         if optimizer is not None and hasattr(optimizer, "lr"):
             optimizer.lr = lr
+
+        if optimizer is not None and state_blob:
+            _import_optimizer_state_blob(optimizer, state_blob)
 
         # Tensors
         for p in params:
