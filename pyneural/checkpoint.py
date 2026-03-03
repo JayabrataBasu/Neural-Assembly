@@ -1,22 +1,35 @@
 """
 Checkpoint save/resume for PyNeural models.
 
-Binary format (v1):
-  HEADER  (16 bytes)
-    magic       : 8 bytes  "NEURCKPT"
-    version     : uint32   1
-    num_tensors : uint32   count of weight tensors
+Binary format (v2):
+    HEADER  (16 bytes)
+        magic       : 8 bytes  "NEURCKPT"
+        version     : uint32   2
+        num_tensors : uint32   count of weight tensors
 
-  METADATA (variable)
-    epoch       : uint32
-    best_loss   : float64
-    lr          : float64
+    METADATA
+        epoch       : uint32
+        best_loss   : float64
+        lr          : float64
 
-  For each tensor:
-    ndim        : uint32
-    shape       : ndim × uint64
-    dtype       : uint32   (0=float32, 1=float64)
-    data        : numel × sizeof(dtype) bytes
+    OPTIMIZER METADATA (v2)
+        has_optimizer : uint8
+        opt_type      : uint8   (0=none, 1=sgd, 2=adam, 3=adamw)
+        reserved      : uint16
+        momentum      : float64
+        beta1         : float64
+        beta2         : float64
+        epsilon       : float64
+        weight_decay  : float64
+
+    For each tensor:
+        ndim        : uint32
+        shape       : ndim × uint64
+        dtype       : uint32   (0=float32, 1=float64)
+        data        : numel × sizeof(dtype) bytes
+
+Backward compatibility:
+    - v1 checkpoints (without optimizer metadata) are still loadable.
 """
 
 from __future__ import annotations
@@ -29,7 +42,53 @@ from typing import Optional
 from .core import _lib, NeuralDtype
 
 MAGIC = b"NEURCKPT"
-VERSION = 1
+VERSION = 2
+
+OPT_NONE = 0
+OPT_SGD = 1
+OPT_ADAM = 2
+OPT_ADAMW = 3
+
+
+def _optimizer_payload(optimizer) -> tuple[int, float, float, float, float, float]:
+    """Return optimizer type and standardized hyper-parameter payload."""
+    if optimizer is None:
+        return OPT_NONE, 0.0, 0.0, 0.0, 0.0, 0.0
+
+    name = optimizer.__class__.__name__.lower()
+    momentum = float(getattr(optimizer, "momentum", 0.0))
+    beta1 = float(getattr(optimizer, "beta1", 0.0))
+    beta2 = float(getattr(optimizer, "beta2", 0.0))
+    epsilon = float(getattr(optimizer, "epsilon", 0.0))
+    weight_decay = float(getattr(optimizer, "weight_decay", 0.0))
+
+    if name == "sgd":
+        return OPT_SGD, momentum, 0.0, 0.0, 0.0, 0.0
+    if name == "adam":
+        return OPT_ADAM, 0.0, beta1, beta2, epsilon, 0.0
+    if name == "adamw":
+        return OPT_ADAMW, 0.0, beta1, beta2, epsilon, weight_decay
+    return OPT_NONE, 0.0, 0.0, 0.0, 0.0, 0.0
+
+
+def _apply_optimizer_payload(optimizer, opt_type: int, payload: tuple[float, float, float, float, float]) -> None:
+    """Apply loaded optimizer metadata to an existing optimizer object."""
+    if optimizer is None or opt_type == OPT_NONE:
+        return
+
+    momentum, beta1, beta2, epsilon, weight_decay = payload
+
+    # Apply only attributes the object actually exposes.
+    if hasattr(optimizer, "momentum"):
+        optimizer.momentum = momentum
+    if hasattr(optimizer, "beta1"):
+        optimizer.beta1 = beta1
+    if hasattr(optimizer, "beta2"):
+        optimizer.beta2 = beta2
+    if hasattr(optimizer, "epsilon"):
+        optimizer.epsilon = epsilon
+    if hasattr(optimizer, "weight_decay"):
+        optimizer.weight_decay = weight_decay
 
 
 def _tensor_raw_bytes(tensor) -> bytes:
@@ -100,6 +159,7 @@ def _read_tensor_into(f, tensor) -> None:
 def save_checkpoint(
     filepath: str,
     model,
+    optimizer=None,
     epoch: int = 0,
     best_loss: float = float("inf"),
     lr: float = 0.0,
@@ -110,6 +170,7 @@ def save_checkpoint(
     Args:
         filepath: Path to the output file.
         model: A Module (typically Sequential) whose parameters() to save.
+        optimizer: Optional optimizer object (SGD/Adam/AdamW metadata saved).
         epoch: Current training epoch.
         best_loss: Best validation/training loss so far.
         lr: Current learning rate.
@@ -127,6 +188,12 @@ def save_checkpoint(
         f.write(struct.pack("<d", best_loss))
         f.write(struct.pack("<d", lr))
 
+        # Optimizer metadata (v2)
+        opt_type, momentum, beta1, beta2, epsilon, weight_decay = _optimizer_payload(optimizer)
+        has_optimizer = 1 if opt_type != OPT_NONE else 0
+        f.write(struct.pack("<BBH", has_optimizer, opt_type, 0))
+        f.write(struct.pack("<ddddd", momentum, beta1, beta2, epsilon, weight_decay))
+
         # Tensors
         for p in params:
             _write_tensor(f, p)
@@ -135,6 +202,8 @@ def save_checkpoint(
 def load_checkpoint(
     filepath: str,
     model,
+    optimizer=None,
+    strict_optimizer: bool = False,
 ) -> dict:
     """
     Load model parameters from a binary checkpoint.
@@ -142,9 +211,11 @@ def load_checkpoint(
     Args:
         filepath: Path to the checkpoint file.
         model: A Module whose parameters() will be overwritten.
+        optimizer: Optional optimizer object to update from checkpoint metadata.
+        strict_optimizer: If True, raise on optimizer-type mismatch.
 
     Returns:
-        dict with keys: 'epoch', 'best_loss', 'lr'
+        dict with keys: 'epoch', 'best_loss', 'lr', 'optimizer_type'
 
     Raises:
         FileNotFoundError: If file doesn't exist.
@@ -164,8 +235,8 @@ def load_checkpoint(
             raise ValueError(f"Invalid checkpoint magic: {magic!r} (expected {MAGIC!r})")
 
         ver = struct.unpack("<I", f.read(4))[0]
-        if ver != VERSION:
-            raise ValueError(f"Unsupported checkpoint version {ver} (expected {VERSION})")
+        if ver not in (1, VERSION):
+            raise ValueError(f"Unsupported checkpoint version {ver} (expected 1 or {VERSION})")
 
         num_tensors = struct.unpack("<I", f.read(4))[0]
         if num_tensors != len(params):
@@ -179,8 +250,43 @@ def load_checkpoint(
         best_loss = struct.unpack("<d", f.read(8))[0]
         lr = struct.unpack("<d", f.read(8))[0]
 
+        optimizer_type = OPT_NONE
+        if ver >= 2:
+            hdr = f.read(4)
+            if len(hdr) < 4:
+                raise IOError("Truncated checkpoint: expected optimizer header")
+            has_optimizer, optimizer_type, _ = struct.unpack("<BBH", hdr)
+
+            vals = f.read(40)
+            if len(vals) < 40:
+                raise IOError("Truncated checkpoint: expected optimizer payload")
+            payload = struct.unpack("<ddddd", vals)
+
+            if has_optimizer and optimizer is not None:
+                if strict_optimizer:
+                    cls = optimizer.__class__.__name__.lower()
+                    expected = {
+                        OPT_SGD: "sgd",
+                        OPT_ADAM: "adam",
+                        OPT_ADAMW: "adamw",
+                    }.get(optimizer_type, "unknown")
+                    if expected != "unknown" and cls != expected:
+                        raise ValueError(
+                            f"Optimizer type mismatch: checkpoint={expected}, provided={cls}"
+                        )
+                _apply_optimizer_payload(optimizer, optimizer_type, payload)
+
+        # Apply loaded LR to optimizer when provided.
+        if optimizer is not None and hasattr(optimizer, "lr"):
+            optimizer.lr = lr
+
         # Tensors
         for p in params:
             _read_tensor_into(f, p)
 
-    return {"epoch": epoch, "best_loss": best_loss, "lr": lr}
+    return {
+        "epoch": epoch,
+        "best_loss": best_loss,
+        "lr": lr,
+        "optimizer_type": optimizer_type,
+    }
