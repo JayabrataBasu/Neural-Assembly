@@ -1862,17 +1862,8 @@ neural_sequential_forward:
     cmp rax, 1
     je .single_module
     
-    ; Multiple modules - need intermediate tensors.
-    ; We allocate a single scratch tensor that gets reused between layers.
-    ; Each linear layer's output shape is [batch_size, out_features].
-    ; Activation layers are in-place (same shape), so the scratch tensor
-    ; only needs to be as large as the largest intermediate output.
-    ;
-    ; Strategy: for the first non-final layer, forward into a dynamically
-    ; allocated tensor. Swap input/scratch each iteration. The final
-    ; layer writes directly into r14 (caller's output tensor).
-    ; NOTE: we rely on MODULE_FORWARD_FN writing output in-place to the
-    ; provided output tensor, which is how linear_forward_fn works.
+    ; Multiple modules: chain intermediate Node* outputs via a temporary
+    ; output slot for non-final layers. Final layer writes to caller output.
     
     xor rbx, rbx                    ; rbx = current module index
     mov r15, r13                    ; r15 = current input
@@ -1886,17 +1877,17 @@ neural_sequential_forward:
     mov rdi, [rcx + rbx*8]          ; module
     mov [rsp], rdi                  ; save module pointer
     
-    ; Determine output tensor
+    ; Determine output destination
     mov rax, [r12 + SEQUENTIAL_SIZE]
     dec rax
     cmp rbx, rax
     je .use_final_output
     
-    ; Use intermediate tensor (for now, assume caller handles this)
-    ; This is a limitation - proper implementation would need intermediate tensors
+    ; Use temporary intermediate output slot (Node*)
+    mov qword [rsp + 16], 0
     mov rdi, [rsp]                  ; restore module pointer
     mov rsi, r15                    ; input
-    mov rdx, r14                    ; output (temporary)
+    lea rdx, [rsp + 16]             ; &temp_output
     call [rdi + MODULE_FORWARD_FN]
     test eax, eax
     jnz .error
@@ -1908,10 +1899,11 @@ neural_sequential_forward:
     mov rcx, [r12 + SEQUENTIAL_INTERMEDIATES]
     test rcx, rcx
     jz .no_save_inter
-    mov [rcx + rbx*8], r14          ; save output node/tensor pointer
+    mov rax, [rsp + 16]
+    mov [rcx + rbx*8], rax          ; save intermediate output pointer
     
 .no_save_inter:
-    mov r15, r14                    ; next input is current output
+    mov r15, [rsp + 16]             ; next input is current output
     jmp .next
     
 .use_final_output:
@@ -1929,7 +1921,8 @@ neural_sequential_forward:
     mov rcx, [r12 + SEQUENTIAL_INTERMEDIATES]
     test rcx, rcx
     jz .next
-    mov [rcx + rbx*8], r14
+    mov rax, [r14]
+    mov [rcx + rbx*8], rax
     
 .next:
     inc rbx
@@ -1951,7 +1944,8 @@ neural_sequential_forward:
     mov rcx, [r12 + SEQUENTIAL_INTERMEDIATES]
     test rcx, rcx
     jz .done
-    mov qword [rcx], r14            ; save single output
+    mov rax, [r14]
+    mov [rcx], rax                  ; save single output
     
 .done:
     xor eax, eax
@@ -1998,7 +1992,7 @@ neural_sequential_forward:
     ret
 
 .error:
-    add rsp, 16
+    add rsp, 32
     pop r15
     pop r14
     pop r13
