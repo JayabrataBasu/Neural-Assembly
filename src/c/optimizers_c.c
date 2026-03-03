@@ -355,6 +355,9 @@ int opt_step(void *opt, void **params, void **grads, int64_t n)
     if (!opt || !params || !grads) return NEURAL_ERR_NULL_POINTER;
     OptC *o = (OptC *)opt;
 
+    if (n < 0) return NEURAL_ERR_INVALID_ARGUMENT;
+    if (o->n_params > 0 && n != o->n_params) return NEURAL_ERR_INVALID_ARGUMENT;
+
     switch (o->type) {
         case OPT_SGD:   sgd_step_impl(o, params, grads, n);   break;
         case OPT_ADAM:  adam_step_impl(o, params, grads, n);   break;

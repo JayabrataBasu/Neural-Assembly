@@ -207,6 +207,8 @@ class Trainer:
 
         self.history = TrainingHistory()
         self.nan_detector = NaNDetector(raise_on_detect=False)
+        self.current_epoch: int = 0
+        self.best_loss: float = float("inf")
 
         self._early_stopping: Optional[EarlyStopping] = None
         if self.config.early_stopping_patience is not None:
@@ -221,6 +223,8 @@ class Trainer:
         train_fn: Callable[[], float],
         val_fn: Optional[Callable[[], float]] = None,
         verbose: bool = True,
+        start_epoch: Optional[int] = None,
+        resume: bool = False,
     ) -> TrainingHistory:
         """
         Run the training loop.
@@ -229,18 +233,28 @@ class Trainer:
             train_fn: Callable that runs one epoch of training and returns loss.
             val_fn: Optional callable that runs validation and returns loss.
             verbose: Whether to print progress.
+            start_epoch: Explicit starting epoch index (overrides resume).
+            resume: If True and start_epoch is None, continue from internal
+                trainer epoch cursor (set by ``load_checkpoint`` or previous runs).
 
         Returns:
             TrainingHistory with recorded metrics.
         """
         cfg = self.config
 
-        for epoch in range(cfg.epochs):
+        if start_epoch is None:
+            epoch0 = self.current_epoch if resume else 0
+        else:
+            epoch0 = int(start_epoch)
+
+        for epoch in range(epoch0, epoch0 + cfg.epochs):
             t0 = time.time()
 
             # --- Train one epoch ---
             train_loss = train_fn()
             self.history.train_loss.append(train_loss)
+            if train_loss < self.best_loss:
+                self.best_loss = train_loss
 
             # --- Gradient clipping (applied to optimizer's tracked params) ---
             if cfg.grad_clip_norm is not None and self.optimizer is not None:
@@ -261,6 +275,8 @@ class Trainer:
             if val_fn is not None:
                 val_loss = val_fn()
                 self.history.val_loss.append(val_loss)
+                if val_loss < self.best_loss:
+                    self.best_loss = val_loss
 
             elapsed = time.time() - t0
             self.history.epoch_times.append(elapsed)
@@ -293,4 +309,56 @@ class Trainer:
             for cb in self.callbacks:
                 cb(epoch, self.history)
 
+            self.current_epoch = epoch + 1
+
         return self.history
+
+    def save_checkpoint(self, filepath: str, epoch: Optional[int] = None,
+                        best_loss: Optional[float] = None) -> None:
+        """
+        Save model + optimizer checkpoint using pyneural.checkpoint.
+
+        Args:
+            filepath: Destination checkpoint path.
+            epoch: Optional explicit epoch; defaults to current epoch cursor.
+            best_loss: Optional explicit best loss; defaults to tracked best.
+        """
+        from .checkpoint import save_checkpoint
+
+        ckpt_epoch = self.current_epoch if epoch is None else int(epoch)
+        ckpt_best = self.best_loss if best_loss is None else float(best_loss)
+
+        lr = 0.0
+        if hasattr(self.optimizer, "lr"):
+            try:
+                lr = float(self.optimizer.lr)
+            except Exception:
+                lr = 0.0
+
+        save_checkpoint(
+            filepath,
+            self.model,
+            optimizer=self.optimizer,
+            epoch=ckpt_epoch,
+            best_loss=ckpt_best,
+            lr=lr,
+        )
+
+    def load_checkpoint(self, filepath: str, strict_optimizer: bool = False) -> Dict[str, float]:
+        """
+        Load model + optimizer checkpoint and update trainer cursors.
+
+        Returns the checkpoint metadata dict.
+        """
+        from .checkpoint import load_checkpoint
+
+        meta = load_checkpoint(
+            filepath,
+            self.model,
+            optimizer=self.optimizer,
+            strict_optimizer=strict_optimizer,
+        )
+
+        self.current_epoch = int(meta.get("epoch", 0)) + 1
+        self.best_loss = float(meta.get("best_loss", self.best_loss))
+        return meta

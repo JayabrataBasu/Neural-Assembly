@@ -64,6 +64,59 @@ class Optimizer:
         result = _lib.opt_step(self._ptr, param_ptrs, grad_ptrs, n)
         _check_error(result, label)
 
+    def state_bytes(self) -> bytes:
+        """
+        Export opaque optimizer state bytes from the native backend.
+
+        Returns:
+            Byte blob containing hyperparameters + moment buffers.
+            Empty bytes when no state is available yet.
+        """
+        if not self._ptr:
+            return b""
+        if not hasattr(_lib, "opt_state_bytes"):
+            return b""
+
+        nbytes = int(_lib.opt_state_bytes(self._ptr))
+        if nbytes <= 0:
+            return b""
+
+        buf = (ctypes.c_uint8 * nbytes)()
+        result = _lib.opt_state_export(self._ptr, ctypes.cast(buf, ctypes.c_void_p), nbytes)
+        _check_error(result, "optimizer state export")
+        return bytes(buf)
+
+    def load_state_bytes(self, blob: bytes) -> None:
+        """
+        Import opaque optimizer state bytes into the native backend.
+
+        Args:
+            blob: State data previously produced by ``state_bytes``.
+        """
+        if not blob:
+            return
+        if not self._ptr:
+            raise ValueError("optimizer handle is not initialized")
+        if not hasattr(_lib, "opt_state_import"):
+            raise RuntimeError("loaded libneural.so does not support optimizer state import")
+
+        nbytes = len(blob)
+        buf = (ctypes.c_uint8 * nbytes).from_buffer_copy(blob)
+        result = _lib.opt_state_import(self._ptr, ctypes.cast(buf, ctypes.c_void_p), nbytes)
+        _check_error(result, "optimizer state import")
+
+    def save_state(self, filepath: str) -> None:
+        """Save optimizer state blob to a binary file."""
+        blob = self.state_bytes()
+        with open(filepath, "wb") as f:
+            f.write(blob)
+
+    def load_state(self, filepath: str) -> None:
+        """Load optimizer state blob from a binary file."""
+        with open(filepath, "rb") as f:
+            blob = f.read()
+        self.load_state_bytes(blob)
+
 
 class SGD(Optimizer):
     """
