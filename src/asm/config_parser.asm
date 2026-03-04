@@ -18,6 +18,8 @@ section .data
     section_training:   db "training", 0
     section_optimizer:  db "optimizer", 0
     section_data:       db "data", 0
+    section_loss:       db "loss", 0
+    section_options:    db "options", 0
     
     ; Key names - Model
     key_input_size:     db "input_size", 0
@@ -33,6 +35,9 @@ section .data
     key_batch_size:     db "batch_size", 0
     key_learning_rate:  db "learning_rate", 0
     key_lr:             db "lr", 0
+    key_loss:           db "loss", 0
+    key_loss_function:  db "loss_function", 0
+    key_optimizer_name: db "optimizer", 0
     key_weight_decay:   db "weight_decay", 0
     key_early_stopping: db "early_stopping", 0
     key_patience:       db "patience", 0
@@ -70,6 +75,13 @@ section .data
     ; Optimizer names
     opt_sgd:            db "sgd", 0
     opt_adam:           db "adam", 0
+
+    ; Loss names
+    loss_mse:           db "mse", 0
+    loss_bce:           db "bce", 0
+    loss_cross_entropy: db "cross_entropy", 0
+    loss_crossentropy:  db "crossentropy", 0
+    loss_ce:            db "ce", 0
     
     ; Boolean strings
     str_true:           db "true", 0
@@ -189,6 +201,7 @@ OFF_HIDDEN_SIZES        equ 112
 OFF_LR_STEP_SIZE        equ 144
 OFF_LR_GAMMA            equ 148
 OFF_ARCHITECTURE        equ 152
+OFF_LOSS_TYPE           equ 160
 
 ; Activation enum
 ACT_RELU                equ 0
@@ -199,6 +212,12 @@ ACT_SOFTMAX             equ 3
 ; Optimizer enum
 OPT_SGD                 equ 0
 OPT_ADAM                equ 1
+
+; Loss enum
+LOSS_AUTO               equ 0
+LOSS_MSE                equ 1
+LOSS_BCE                equ 2
+LOSS_CROSS_ENTROPY      equ 3
 
 ; config_create_default - Create config with default values
 ; Returns:
@@ -247,6 +266,7 @@ config_create_default:
     mov dword [rbx + OFF_EARLY_STOPPING], 0
     mov dword [rbx + OFF_PATIENCE], 10
     mov dword [rbx + OFF_OPTIMIZER_TYPE], OPT_SGD
+    mov dword [rbx + OFF_LOSS_TYPE], LOSS_AUTO
     
     ; momentum = 0.9
     mov eax, 0x3F666666                          ; 0.9 in float
@@ -443,6 +463,18 @@ config_parse:
     call str_equals_nocase
     test eax, eax
     jnz .set_section_data
+
+    lea rdi, [rel section_buffer]
+    lea rsi, [rel section_loss]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_section_loss
+
+    lea rdi, [rel section_buffer]
+    lea rsi, [rel section_options]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_section_options
     
     ; Unknown section - skip
     pop rsi                     ; restore buffer position
@@ -465,6 +497,16 @@ config_parse:
     
 .set_section_data:
     mov qword [rel current_section], 4
+    pop rsi                     ; restore buffer position
+    jmp .find_newline
+
+.set_section_loss:
+    mov qword [rel current_section], 5
+    pop rsi                     ; restore buffer position
+    jmp .find_newline
+
+.set_section_options:
+    mov qword [rel current_section], 6
     pop rsi                     ; restore buffer position
     jmp .find_newline
     
@@ -547,6 +589,10 @@ config_parse:
     je .process_optimizer
     cmp rax, 4
     je .process_data
+    cmp rax, 5
+    je .process_loss
+    cmp rax, 6
+    je .process_options
     jmp .find_newline
     
 .process_model:
@@ -570,6 +616,18 @@ config_parse:
 .process_data:
     push rsi
     call process_data_key
+    pop rsi
+    jmp .find_newline
+
+.process_loss:
+    push rsi
+    call process_loss_key
+    pop rsi
+    jmp .find_newline
+
+.process_options:
+    push rsi
+    call process_options_key
     pop rsi
     jmp .find_newline
     
@@ -830,6 +888,54 @@ process_training_key:
     call str_equals_nocase
     test eax, eax
     jnz .set_lr_gamma
+
+    ; Check optimizer (alias in [training])
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_optimizer_name]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_optimizer_type
+
+    ; Check momentum (alias in [training])
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_momentum]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_momentum
+
+    ; Check beta1 (alias in [training])
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_beta1]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_beta1
+
+    ; Check beta2 (alias in [training])
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_beta2]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_beta2
+
+    ; Check epsilon (alias in [training])
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_epsilon]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_epsilon
+
+    ; Check loss and loss_function
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_loss]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_loss_function
+
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_loss_function]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_loss_function
     
     jmp .training_key_done
     
@@ -880,8 +986,229 @@ process_training_key:
     call parse_float
     movss [r13 + OFF_LR_GAMMA], xmm0
     jmp .training_key_done
+
+.set_optimizer_type:
+    lea rdi, [rel value_buffer]
+    call str_to_lower
+
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel opt_sgd]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_optimizer_sgd
+
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel opt_adam]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_optimizer_adam
+    jmp .training_key_done
+
+.set_optimizer_sgd:
+    mov dword [r13 + OFF_OPTIMIZER_TYPE], OPT_SGD
+    jmp .training_key_done
+
+.set_optimizer_adam:
+    mov dword [r13 + OFF_OPTIMIZER_TYPE], OPT_ADAM
+    jmp .training_key_done
+
+.set_momentum:
+    lea rdi, [rel value_buffer]
+    call parse_float
+    movss [r13 + OFF_MOMENTUM], xmm0
+    jmp .training_key_done
+
+.set_beta1:
+    lea rdi, [rel value_buffer]
+    call parse_float
+    movss [r13 + OFF_BETA1], xmm0
+    jmp .training_key_done
+
+.set_beta2:
+    lea rdi, [rel value_buffer]
+    call parse_float
+    movss [r13 + OFF_BETA2], xmm0
+    jmp .training_key_done
+
+.set_epsilon:
+    lea rdi, [rel value_buffer]
+    call parse_float
+    movss [r13 + OFF_EPSILON], xmm0
+    jmp .training_key_done
+
+.set_loss_function:
+    lea rdi, [rel value_buffer]
+    call str_to_lower
+
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel loss_mse]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_loss_mse
+
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel loss_bce]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_loss_bce
+
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel loss_cross_entropy]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_loss_ce
+
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel loss_crossentropy]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_loss_ce
+
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel loss_ce]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_loss_ce
+    jmp .training_key_done
+
+.set_loss_mse:
+    mov dword [r13 + OFF_LOSS_TYPE], LOSS_MSE
+    jmp .training_key_done
+
+.set_loss_bce:
+    mov dword [r13 + OFF_LOSS_TYPE], LOSS_BCE
+    jmp .training_key_done
+
+.set_loss_ce:
+    mov dword [r13 + OFF_LOSS_TYPE], LOSS_CROSS_ENTROPY
+    jmp .training_key_done
     
 .training_key_done:
+    pop rbp
+    ret
+
+; process_loss_key - Handle [loss] section keys
+process_loss_key:
+    push rbp
+    mov rbp, rsp
+
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_loss]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_loss_function
+
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_loss_function]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_loss_function
+    jmp .loss_key_done
+
+.set_loss_function:
+    lea rdi, [rel value_buffer]
+    call str_to_lower
+
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel loss_mse]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_loss_mse
+
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel loss_bce]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_loss_bce
+
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel loss_cross_entropy]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_loss_ce
+
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel loss_crossentropy]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_loss_ce
+
+    lea rdi, [rel value_buffer]
+    lea rsi, [rel loss_ce]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_loss_ce
+    jmp .loss_key_done
+
+.set_loss_mse:
+    mov dword [r13 + OFF_LOSS_TYPE], LOSS_MSE
+    jmp .loss_key_done
+
+.set_loss_bce:
+    mov dword [r13 + OFF_LOSS_TYPE], LOSS_BCE
+    jmp .loss_key_done
+
+.set_loss_ce:
+    mov dword [r13 + OFF_LOSS_TYPE], LOSS_CROSS_ENTROPY
+
+.loss_key_done:
+    pop rbp
+    ret
+
+; process_options_key - Handle [options] section keys
+process_options_key:
+    push rbp
+    mov rbp, rsp
+
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_shuffle]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_shuffle
+
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_normalize]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_normalize
+
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_early_stopping]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_early_stopping
+
+    lea rdi, [rel key_buffer]
+    lea rsi, [rel key_patience]
+    call str_equals_nocase
+    test eax, eax
+    jnz .set_patience
+    jmp .options_key_done
+
+.set_shuffle:
+    lea rdi, [rel value_buffer]
+    call parse_bool
+    mov [r13 + OFF_SHUFFLE], eax
+    jmp .options_key_done
+
+.set_normalize:
+    lea rdi, [rel value_buffer]
+    call parse_bool
+    mov [r13 + OFF_NORMALIZE], eax
+    jmp .options_key_done
+
+.set_early_stopping:
+    lea rdi, [rel value_buffer]
+    call parse_bool
+    mov [r13 + OFF_EARLY_STOPPING], eax
+    jmp .options_key_done
+
+.set_patience:
+    lea rdi, [rel value_buffer]
+    call parse_int
+    mov [r13 + OFF_PATIENCE], eax
+
+.options_key_done:
     pop rbp
     ret
 

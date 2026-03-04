@@ -62,7 +62,7 @@ global bce_loss_backward
 ; mse_loss - Mean Squared Error loss
 ; Arguments:
 ;   RDI = Node* pred (predictions)
-;   RSI = Node* target (ground truth)
+;   RSI = Tensor* target (ground truth)
 ; Returns:
 ;   RAX = Node* loss (scalar)
 ; =============================================================================
@@ -77,7 +77,7 @@ mse_loss:
     sub rsp, 56
     
     mov r12, rdi                    ; pred node
-    mov r13, rsi                    ; target node (not a Node, just Tensor*)
+    mov r13, rsi                    ; target tensor
     
     ; Get prediction tensor
     mov rax, [r12 + NODE_VALUE]
@@ -98,11 +98,9 @@ mse_loss:
     mov rbx, rax
     
     ; Compute diff = pred - target
-    ; Note: target is passed as Node*, get its value
     mov rdi, rbx
     mov rsi, r14
-    mov rax, [r13 + NODE_VALUE]
-    mov rdx, rax
+    mov rdx, r13
     call ew_sub
     
     ; Square the diff: diff = diff * diff
@@ -158,15 +156,14 @@ mse_loss:
     lea rcx, [rel mse_loss_backward]
     mov [rax + NODE_BACKWARD_FN], rcx
     
-    ; Set parents (pred, target)
-    mov dword [rax + NODE_N_PARENTS], 2
+    ; Set parent (pred only)
+    mov dword [rax + NODE_N_PARENTS], 1
     push rax
-    mov rdi, 16
+    mov rdi, 8
     call mem_alloc
     pop rcx
     mov [rcx + NODE_PARENTS], rax
     mov [rel rax], r12                  ; parent[0] = pred
-    mov [rax + 8], r13              ; parent[1] = target
     
     ; Save diff tensor for backward
     push rcx

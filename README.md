@@ -306,6 +306,7 @@ Example configurations are provided in the `configs/` directory:
 | -------- | ------------- | -------------- |
 | `xor_config.ini` | XOR learning | 2→8→1 |
 | `mnist_config.ini` | MNIST digits | 784→256→128→10 |
+| `california_housing_config.ini` | California Housing regression | 8→64→32→1 |
 | `sine_config.ini` | Sine regression | 1→32→32→1 |
 | `binary_class_config.ini` | Spiral classification | 2→16→16→1 |
 | `deep_network_config.ini` | Deep network | 10→64→64→64→64→10 |
@@ -338,6 +339,28 @@ python3 tools/prepare_wine_quality.py
 | Parameters | 3,046 |
 | Final Train Loss | 0.94 |
 | Train Accuracy | ~60% |
+
+## California Housing (Regression)
+
+You can also run a tabular regression workflow on California Housing:
+
+```bash
+# Prepare data (uses sklearn dataset if available, otherwise synthetic fallback)
+python3 tools/prepare_california_housing.py
+
+# Train regression model
+./neural_framework train configs/california_housing_config.ini /tmp/na_california.bin
+
+# (Optional) inference pass
+./neural_framework infer configs/california_housing_config.ini /tmp/na_california.bin
+```
+
+Dataset files produced in `csv/`:
+
+- `california_train.csv`
+- `california_train_labels.csv`
+- `california_val.csv`
+- `california_val_labels.csv`
 | Val Accuracy | ~65–68% |
 
 This dataset provides a meaningful, non-trivial benchmark: the model learns real patterns (loss decreasing from 1.51 to 0.94) but doesn't achieve trivial 100% accuracy due to genuine class overlap in the data. Comparable to typical ML baselines for this dataset (50–65% accuracy with simple models).

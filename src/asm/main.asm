@@ -222,6 +222,13 @@ section .text
     OFF_LR_STEP_SIZE        equ 144
     OFF_LR_GAMMA            equ 148
     OFF_ARCHITECTURE        equ 152
+    OFF_LOSS_TYPE           equ 160
+
+    ; Loss enum (matches config_parser.asm)
+    LOSS_AUTO               equ 0
+    LOSS_MSE                equ 1
+    LOSS_BCE                equ 2
+    LOSS_CROSS_ENTROPY      equ 3
     
     ; Model I/O
     extern model_save
@@ -2817,19 +2824,32 @@ train_epoch:
     jz .cleanup_batch
     mov rbx, rax                ; predictions node
     
-    ; Calculate loss - use BCE for binary (output_size=1), CE for multi-class
+    ; Calculate loss
     mov rdi, rbx                ; predictions node
     mov rsi, [rbp - 72]         ; batch_y tensor (labels)
+
+    ; Prefer explicit configured loss when available
+    mov eax, [r15 + OFF_LOSS_TYPE]
+    cmp eax, LOSS_MSE
+    je .use_mse_loss
+    cmp eax, LOSS_BCE
+    je .use_bce_loss
+    cmp eax, LOSS_CROSS_ENTROPY
+    je .use_ce_loss
     
-    ; Check output_size from config (offset 8)
-    mov eax, [r15 + 8]          ; output_size
+    ; AUTO fallback: BCE for binary (output_size=1/2), CE otherwise
+    mov eax, [r15 + OFF_OUTPUT_SIZE]
     cmp eax, 1
     je .use_bce_loss
-    cmp eax, 2                  ; Also use BCE for 2-class (binary)
+    cmp eax, 2
     je .use_bce_loss
-    
-    ; Multi-class: use cross_entropy_loss
+
+.use_ce_loss:
     call cross_entropy_loss
+    jmp .loss_computed
+
+.use_mse_loss:
+    call mse_loss
     jmp .loss_computed
     
 .use_bce_loss:
@@ -2845,8 +2865,13 @@ train_epoch:
 
 .loss_computed:
     push rax                    ; save loss node
-    
-    ; Calculate accuracy
+
+    ; Calculate accuracy only for classification losses
+    mov eax, [r15 + OFF_LOSS_TYPE]
+    cmp eax, LOSS_MSE
+    je .skip_batch_accuracy
+
+    ; Classification accuracy
     mov rcx, [rel rbx]              ; predictions node -> value (tensor)
     mov rdi, rcx                ; logits tensor
     mov rsi, [rbp - 72]         ; batch_y tensor
@@ -2855,6 +2880,8 @@ train_epoch:
     add [rel correct_count], eax
     mov eax, [rbp - 48]         ; batch_size
     add [rel total_count], eax
+
+.skip_batch_accuracy:
     
     pop rax                     ; restore loss node
     
