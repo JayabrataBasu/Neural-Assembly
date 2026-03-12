@@ -99,6 +99,16 @@ from .datasets import (
 )
 from .arch import parse_architecture, parse_residual_block
 from .sklearn_compat import MLPClassifier, MLPRegressor
+from .export import ONNXExporter, export_model
+from .jupyter_utils import (
+    ProgressBar, NotebookCallback, LivePlotter, EpochTimer,
+    NotebookTrainer, configure_notebook_mode, setup_training_display
+)
+from .errors import (
+    ValidationError, ShapeMismatchError, ConfigError,
+    ErrorMessageBuilder, ShapeValidator, ConfigValidator, DataValidator,
+    safe_shape_check
+)
 from .fuzzy import (
     FuzzySystem,
     triangular, trapezoidal, gaussian,
@@ -280,4 +290,24 @@ __all__ = [
     # Recurrent Layers
     "LSTM",
     "GRU",
+    # ONNX Export
+    "ONNXExporter",
+    "export_model",
+    # Jupyter Integration
+    "ProgressBar",
+    "NotebookCallback",
+    "LivePlotter",
+    "EpochTimer",
+    "NotebookTrainer",
+    "configure_notebook_mode",
+    "setup_training_display",
+    # Error Handling
+    "ValidationError",
+    "ShapeMismatchError",
+    "ConfigError",
+    "ErrorMessageBuilder",
+    "ShapeValidator",
+    "ConfigValidator",
+    "DataValidator",
+    "safe_shape_check",
 ]
