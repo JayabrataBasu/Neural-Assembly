@@ -30,6 +30,7 @@ from .tensor import Tensor
 from .nn import (
     Linear, ReLU, Sigmoid, Softmax, Tanh, Dropout, Sequential,
     BatchNorm1d, LayerNorm, Embedding,
+    Flatten, ResidualBlock,
     MSELoss, CrossEntropyLoss, LabelSmoothingCrossEntropy,
 )
 from .optim import SGD, Adam, AdamW
@@ -67,6 +68,10 @@ from .config import Config
 
 # New modules
 from .metrics import ConfusionMatrix, compute_accuracy, top_k_accuracy, roc_auc_score
+from .metrics import (
+    mean_absolute_error, mean_squared_error,
+    root_mean_squared_error, r2_score, explained_variance,
+)
 from .schedulers import (
     StepLR,
     ExponentialLR,
@@ -82,6 +87,18 @@ from .tb_logger import SummaryWriter
 from .pruning import Pruner, prune_magnitude, prune_rows, prune_cols
 from .quantize import Quantizer, QuantParams, quantized_matmul
 from .transforms import Normalize, MinMaxScale, Compose, compute_stats
+from .transforms import (
+    ToTensor, RandomHorizontalFlip, RandomVerticalFlip,
+    RandomCrop, RandomRotation, RandomNoise, RandomErasing,
+)
+from .datasets import (
+    MNIST, FashionMNIST, CIFAR10,
+    Iris, WineQuality,
+    VisionDataset, TabularDataset,
+    train_test_split,
+)
+from .arch import parse_architecture, parse_residual_block
+from .sklearn_compat import MLPClassifier, MLPRegressor
 from .fuzzy import (
     FuzzySystem,
     triangular, trapezoidal, gaussian,
@@ -103,7 +120,7 @@ weight_init = _importlib.import_module('.init', __name__)
 # Re-import core.init to ensure pn.init() is the framework initializer
 from .core import init
 
-__version__ = "2.1.0"
+__version__ = "3.0.0"
 __all__ = [
     # Core
     "init",
@@ -125,6 +142,8 @@ __all__ = [
     "Dropout",
     "Sequential",
     "Embedding",
+    "Flatten",
+    "ResidualBlock",
     # Normalization
     "BatchNorm1d",
     "LayerNorm",
@@ -155,11 +174,26 @@ __all__ = [
     "WeightedRandomSampler",
     "BatchSampler",
     "Config",
-    # Metrics
+    # Native Datasets
+    "MNIST",
+    "FashionMNIST",
+    "CIFAR10",
+    "Iris",
+    "WineQuality",
+    "VisionDataset",
+    "TabularDataset",
+    "train_test_split",
+    # Metrics - Classification
     "ConfusionMatrix",
     "compute_accuracy",
     "top_k_accuracy",
     "roc_auc_score",
+    # Metrics - Regression
+    "mean_absolute_error",
+    "mean_squared_error",
+    "root_mean_squared_error",
+    "r2_score",
+    "explained_variance",
     # Schedulers
     "StepLR",
     "ExponentialLR",
@@ -177,6 +211,12 @@ __all__ = [
     # Checkpoint
     "save_checkpoint",
     "load_checkpoint",
+    # Architecture DSL
+    "parse_architecture",
+    "parse_residual_block",
+    # sklearn-compatible API
+    "MLPClassifier",
+    "MLPRegressor",
     # Weight Initialization
     "weight_init",
     # TensorBoard Logging
@@ -195,6 +235,13 @@ __all__ = [
     "MinMaxScale",
     "Compose",
     "compute_stats",
+    "ToTensor",
+    "RandomHorizontalFlip",
+    "RandomVerticalFlip",
+    "RandomCrop",
+    "RandomRotation",
+    "RandomNoise",
+    "RandomErasing",
     # Fuzzy Logic
     "FuzzySystem",
     "triangular",

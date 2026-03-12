@@ -9,6 +9,9 @@ __pycache__/
 .DS_Store
 *.swp
 
+# Planning and strategy documents (local only)
+UPGRADE_ROADMAP.md
+
 # Issue tracking and verification files
 model_loading_issue.md
 VERIFICATION_GUIDE.md

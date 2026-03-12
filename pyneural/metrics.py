@@ -274,3 +274,127 @@ def roc_auc_score(y_true: List[int], y_score: List[float]) -> float:
     if result != 0:
         raise RuntimeError("roc_auc_score failed in C backend")
     return auc.value
+
+
+# ---------------------------------------------------------------------------
+# Regression Metrics
+# ---------------------------------------------------------------------------
+
+def mean_absolute_error(y_true: List[float], y_pred: List[float]) -> float:
+    """
+    Mean Absolute Error: (1/n) * sum(|y_true - y_pred|).
+
+    Args:
+        y_true: Ground-truth values.
+        y_pred: Predicted values.
+
+    Returns:
+        MAE as a float.
+    """
+    if len(y_true) != len(y_pred):
+        raise ValueError(
+            f"y_true and y_pred must have same length, "
+            f"got {len(y_true)} and {len(y_pred)}"
+        )
+    if len(y_true) == 0:
+        return 0.0
+    return sum(abs(t - p) for t, p in zip(y_true, y_pred)) / len(y_true)
+
+
+def mean_squared_error(y_true: List[float], y_pred: List[float]) -> float:
+    """
+    Mean Squared Error: (1/n) * sum((y_true - y_pred)^2).
+
+    Args:
+        y_true: Ground-truth values.
+        y_pred: Predicted values.
+
+    Returns:
+        MSE as a float.
+    """
+    if len(y_true) != len(y_pred):
+        raise ValueError(
+            f"y_true and y_pred must have same length, "
+            f"got {len(y_true)} and {len(y_pred)}"
+        )
+    if len(y_true) == 0:
+        return 0.0
+    return sum((t - p) ** 2 for t, p in zip(y_true, y_pred)) / len(y_true)
+
+
+def root_mean_squared_error(y_true: List[float], y_pred: List[float]) -> float:
+    """
+    Root Mean Squared Error: sqrt(MSE).
+
+    Args:
+        y_true: Ground-truth values.
+        y_pred: Predicted values.
+
+    Returns:
+        RMSE as a float.
+    """
+    import math
+    return math.sqrt(mean_squared_error(y_true, y_pred))
+
+
+def r2_score(y_true: List[float], y_pred: List[float]) -> float:
+    """
+    R-squared (coefficient of determination).
+
+    R² = 1 - SS_res / SS_tot
+    where SS_res = sum((y_true - y_pred)^2)
+          SS_tot = sum((y_true - mean(y_true))^2)
+
+    Args:
+        y_true: Ground-truth values.
+        y_pred: Predicted values.
+
+    Returns:
+        R² score. 1.0 is perfect; 0.0 means model predicts the mean;
+        negative means worse than predicting the mean.
+    """
+    if len(y_true) != len(y_pred):
+        raise ValueError(
+            f"y_true and y_pred must have same length, "
+            f"got {len(y_true)} and {len(y_pred)}"
+        )
+    n = len(y_true)
+    if n == 0:
+        return 0.0
+    mean_y = sum(y_true) / n
+    ss_tot = sum((t - mean_y) ** 2 for t in y_true)
+    ss_res = sum((t - p) ** 2 for t, p in zip(y_true, y_pred))
+    if ss_tot == 0.0:
+        return 0.0 if ss_res > 0 else 1.0
+    return 1.0 - ss_res / ss_tot
+
+
+def explained_variance(y_true: List[float], y_pred: List[float]) -> float:
+    """
+    Explained Variance Score.
+
+    EV = 1 - Var(y_true - y_pred) / Var(y_true)
+
+    Args:
+        y_true: Ground-truth values.
+        y_pred: Predicted values.
+
+    Returns:
+        Explained variance score.
+    """
+    if len(y_true) != len(y_pred):
+        raise ValueError(
+            f"y_true and y_pred must have same length, "
+            f"got {len(y_true)} and {len(y_pred)}"
+        )
+    n = len(y_true)
+    if n == 0:
+        return 0.0
+    residuals = [t - p for t, p in zip(y_true, y_pred)]
+    mean_res = sum(residuals) / n
+    var_res = sum((r - mean_res) ** 2 for r in residuals) / n
+    mean_y = sum(y_true) / n
+    var_y = sum((t - mean_y) ** 2 for t in y_true) / n
+    if var_y == 0.0:
+        return 0.0 if var_res > 0 else 1.0
+    return 1.0 - var_res / var_y

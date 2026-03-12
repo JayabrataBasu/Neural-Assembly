@@ -149,6 +149,11 @@ section .data
     cfg_optim:      db "    Optimizer:     ", 0
     cfg_sgd_str:    db "SGD", 10, 0
     cfg_adam_str:   db "Adam", 10, 0
+    cfg_loss:       db "    Loss:          ", 0
+    cfg_loss_auto:  db "Auto", 10, 0
+    cfg_loss_mse:   db "MSE", 10, 0
+    cfg_loss_bce:   db "BCE", 10, 0
+    cfg_loss_ce:    db "CrossEntropy", 10, 0
 
     ; Timing strings
     msg_time:       db "[*] Training time: ", 0
@@ -1006,6 +1011,29 @@ print_config_summary:
 .cfg_print_adam:
     lea rdi, [rel cfg_adam_str]
 .cfg_print_opt:
+    call print_string
+
+    ; Loss function
+    lea rdi, [rel cfg_loss]
+    call print_string
+    mov eax, [rbx + OFF_LOSS_TYPE]
+    cmp eax, LOSS_MSE
+    je .cfg_print_mse
+    cmp eax, LOSS_BCE
+    je .cfg_print_bce
+    cmp eax, LOSS_CROSS_ENTROPY
+    je .cfg_print_ce
+    lea rdi, [rel cfg_loss_auto]
+    jmp .cfg_print_loss
+.cfg_print_mse:
+    lea rdi, [rel cfg_loss_mse]
+    jmp .cfg_print_loss
+.cfg_print_bce:
+    lea rdi, [rel cfg_loss_bce]
+    jmp .cfg_print_loss
+.cfg_print_ce:
+    lea rdi, [rel cfg_loss_ce]
+.cfg_print_loss:
     call print_string
 
 .cfg_done:

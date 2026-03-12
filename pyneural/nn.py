@@ -302,6 +302,114 @@ class Dropout(Module):
         return f"Dropout(p={self.p})"
 
 
+class Flatten(Module):
+    """
+    Flatten a multi-dimensional tensor to 2D (batch_size, -1).
+
+    Useful between Conv2D/Pool layers and Dense layers.
+
+    Example:
+        >>> flatten = Flatten()
+        >>> x = Tensor.zeros([16, 32, 7, 7])  # (batch, channels, h, w)
+        >>> y = flatten(x)                      # (16, 1568)
+    """
+
+    def __init__(self, start_dim: int = 1, end_dim: int = -1):
+        super().__init__()
+        self.start_dim = start_dim
+        self.end_dim = end_dim
+        self._input_shape = None
+
+    def forward(self, x: Tensor) -> Tensor:
+        shape = x.shape
+        self._input_shape = shape
+
+        # Compute flattened dimension
+        ndim = len(shape)
+        start = self.start_dim if self.start_dim >= 0 else ndim + self.start_dim
+        end = self.end_dim if self.end_dim >= 0 else ndim + self.end_dim
+
+        new_shape = list(shape[:start])
+        flat_size = 1
+        for d in range(start, end + 1):
+            flat_size *= shape[d]
+        new_shape.append(flat_size)
+        new_shape.extend(shape[end + 1:])
+
+        # Create output tensor with new shape
+        output = Tensor.create(new_shape, x.dtype)
+
+        # Copy data
+        src_data = _lib.neural_tensor_data(x._ptr)
+        dst_data = _lib.neural_tensor_data(output._ptr)
+        numel = int(_lib.neural_tensor_numel(x._ptr))
+        ctypes.memmove(dst_data, src_data, numel * 8)  # float64 = 8 bytes
+
+        return output
+
+    def parameters(self) -> List[Tensor]:
+        return []
+
+    def __repr__(self) -> str:
+        return f"Flatten(start_dim={self.start_dim}, end_dim={self.end_dim})"
+
+
+class ResidualBlock(Module):
+    """
+    Residual (skip connection) block.
+
+    Wraps a sequence of layers and adds the input to the output:
+        output = block(x) + x
+
+    If the input and output dimensions differ, a projection layer
+    can be provided.
+
+    Args:
+        layers: List of modules to apply sequentially.
+        projection: Optional module to project input to match output shape.
+
+    Example:
+        >>> block = ResidualBlock([
+        ...     Linear(128, 128),
+        ...     ReLU(),
+        ...     Linear(128, 128),
+        ... ])
+        >>> x = Tensor.zeros([32, 128])
+        >>> y = block(x)  # y = layers(x) + x
+    """
+
+    def __init__(self, layers: List[Module], projection: Optional[Module] = None):
+        super().__init__()
+        self._block = Sequential(layers)
+        self._projection = projection
+        self._modules = list(layers)
+        if projection is not None:
+            self._modules.append(projection)
+
+    def forward(self, x: Tensor) -> Tensor:
+        identity = x
+        out = self._block(x)
+
+        if self._projection is not None:
+            identity = self._projection(x)
+
+        # Element-wise add: out = out + identity
+        out_data = _lib.neural_tensor_data(out._ptr)
+        id_data = _lib.neural_tensor_data(identity._ptr)
+        numel = int(_lib.neural_tensor_numel(out._ptr))
+        # Use ctypes to add in-place
+        for i in range(numel):
+            val_out = ctypes.cast(out_data, ctypes.POINTER(ctypes.c_double))[i]
+            val_id = ctypes.cast(id_data, ctypes.POINTER(ctypes.c_double))[i]
+            ctypes.cast(out_data, ctypes.POINTER(ctypes.c_double))[i] = val_out + val_id
+
+        return out
+
+    def __repr__(self) -> str:
+        proj = f", projection={self._projection}" if self._projection else ""
+        return f"ResidualBlock({self._block}{proj})"
+
+
 class Sequential(Module):
     """
     A sequential container of modules.

@@ -150,6 +150,12 @@ class TrainerConfig:
     early_stopping_patience: Optional[int] = None
     early_stopping_min_delta: float = 0.0
     early_stopping_mode: str = "min"
+    # Gradient accumulation: step optimizer every N mini-batches
+    accumulate_steps: int = 1
+    # Best model checkpointing
+    best_model_path: Optional[str] = None
+    restore_best: bool = True
+    val_monitor: str = "loss"
 
 
 @dataclass
@@ -209,6 +215,8 @@ class Trainer:
         self.nan_detector = NaNDetector(raise_on_detect=False)
         self.current_epoch: int = 0
         self.best_loss: float = float("inf")
+        self._best_val_metric: float = float("inf") if self.config.early_stopping_mode == "min" else float("-inf")
+        self._best_checkpoint_path: Optional[str] = self.config.best_model_path
 
         self._early_stopping: Optional[EarlyStopping] = None
         if self.config.early_stopping_patience is not None:
@@ -278,6 +286,19 @@ class Trainer:
                 if val_loss < self.best_loss:
                     self.best_loss = val_loss
 
+                # --- Save best model checkpoint ---
+                metric = val_loss
+                is_best = False
+                if cfg.early_stopping_mode == "min":
+                    is_best = metric < self._best_val_metric
+                else:
+                    is_best = metric > self._best_val_metric
+                if is_best:
+                    self._best_val_metric = metric
+                    if self._best_checkpoint_path:
+                        self.save_checkpoint(self._best_checkpoint_path,
+                                             epoch=epoch, best_loss=metric)
+
             elapsed = time.time() - t0
             self.history.epoch_times.append(elapsed)
 
@@ -304,6 +325,16 @@ class Trainer:
                             f"at epoch {self._early_stopping.best_epoch})"
                         )
                     break
+
+        # --- Restore best model ---
+        if (cfg.restore_best and self._best_checkpoint_path
+                and self._early_stopping is not None):
+            try:
+                self.load_checkpoint(self._best_checkpoint_path)
+                if verbose:
+                    print(f"Restored best model (val={self._best_val_metric:.6f})")
+            except Exception:
+                pass  # best checkpoint may not exist if no validation improved
 
             # --- Callbacks ---
             for cb in self.callbacks:

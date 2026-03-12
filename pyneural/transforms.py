@@ -247,3 +247,293 @@ class Compose:
     def __repr__(self) -> str:
         inner = ", ".join(repr(t) for t in self.transforms)
         return f"Compose([{inner}])"
+
+
+# ---------------------------------------------------------------------------
+# Image Augmentation Transforms
+# ---------------------------------------------------------------------------
+
+import math
+import random as _random
+
+
+class ToTensor:
+    """
+    Convert a flat list of pixel values to a normalized float list.
+
+    If values are in [0, 255], scales them to [0.0, 1.0].
+    """
+
+    def __call__(self, data: List[float], num_features: int) -> List[float]:
+        max_val = max(data) if data else 1.0
+        if max_val > 1.0:
+            return [v / 255.0 for v in data]
+        return list(data)
+
+    def __repr__(self) -> str:
+        return "ToTensor()"
+
+
+class RandomHorizontalFlip:
+    """
+    Randomly flip an image horizontally.
+
+    Operates on a flat pixel list assumed to be (C, H, W) layout.
+
+    Args:
+        p: Probability of flipping (default: 0.5).
+        height: Image height.
+        width: Image width.
+        channels: Number of channels (default: 1).
+    """
+
+    def __init__(self, p: float = 0.5, height: int = 28, width: int = 28,
+                 channels: int = 1):
+        self.p = p
+        self.height = height
+        self.width = width
+        self.channels = channels
+
+    def __call__(self, data: List[float], num_features: int) -> List[float]:
+        if _random.random() >= self.p:
+            return data
+
+        result = list(data)
+        for c in range(self.channels):
+            for h in range(self.height):
+                for w in range(self.width // 2):
+                    idx1 = c * self.height * self.width + h * self.width + w
+                    idx2 = c * self.height * self.width + h * self.width + (self.width - 1 - w)
+                    result[idx1], result[idx2] = result[idx2], result[idx1]
+        return result
+
+    def __repr__(self) -> str:
+        return f"RandomHorizontalFlip(p={self.p})"
+
+
+class RandomVerticalFlip:
+    """
+    Randomly flip an image vertically.
+
+    Args:
+        p: Probability of flipping (default: 0.5).
+        height: Image height.
+        width: Image width.
+        channels: Number of channels (default: 1).
+    """
+
+    def __init__(self, p: float = 0.5, height: int = 28, width: int = 28,
+                 channels: int = 1):
+        self.p = p
+        self.height = height
+        self.width = width
+        self.channels = channels
+
+    def __call__(self, data: List[float], num_features: int) -> List[float]:
+        if _random.random() >= self.p:
+            return data
+
+        result = list(data)
+        for c in range(self.channels):
+            for h in range(self.height // 2):
+                for w in range(self.width):
+                    idx1 = c * self.height * self.width + h * self.width + w
+                    idx2 = c * self.height * self.width + (self.height - 1 - h) * self.width + w
+                    result[idx1], result[idx2] = result[idx2], result[idx1]
+        return result
+
+    def __repr__(self) -> str:
+        return f"RandomVerticalFlip(p={self.p})"
+
+
+class RandomCrop:
+    """
+    Randomly crop an image and pad back to original size.
+
+    Args:
+        height: Image height.
+        width: Image width.
+        padding: Number of pixels to pad on each side.
+        channels: Number of channels (default: 1).
+        fill: Fill value for padding (default: 0.0).
+    """
+
+    def __init__(self, height: int = 28, width: int = 28, padding: int = 4,
+                 channels: int = 1, fill: float = 0.0):
+        self.height = height
+        self.width = width
+        self.padding = padding
+        self.channels = channels
+        self.fill = fill
+
+    def __call__(self, data: List[float], num_features: int) -> List[float]:
+        pad = self.padding
+        h, w, c = self.height, self.width, self.channels
+        padded_h = h + 2 * pad
+        padded_w = w + 2 * pad
+
+        # Create padded image
+        padded = [self.fill] * (c * padded_h * padded_w)
+        for ch in range(c):
+            for row in range(h):
+                for col in range(w):
+                    src = ch * h * w + row * w + col
+                    dst = ch * padded_h * padded_w + (row + pad) * padded_w + (col + pad)
+                    padded[dst] = data[src]
+
+        # Random crop from padded
+        top = _random.randint(0, 2 * pad)
+        left = _random.randint(0, 2 * pad)
+
+        result = [0.0] * (c * h * w)
+        for ch in range(c):
+            for row in range(h):
+                for col in range(w):
+                    src = ch * padded_h * padded_w + (top + row) * padded_w + (left + col)
+                    dst = ch * h * w + row * w + col
+                    result[dst] = padded[src]
+
+        return result
+
+    def __repr__(self) -> str:
+        return f"RandomCrop(padding={self.padding})"
+
+
+class RandomRotation:
+    """
+    Randomly rotate an image by a small angle.
+
+    Uses bilinear interpolation. Operates on (C, H, W) flat layout.
+
+    Args:
+        degrees: Maximum rotation angle in degrees (± degrees).
+        height: Image height.
+        width: Image width.
+        channels: Number of channels (default: 1).
+        fill: Fill value for empty pixels after rotation.
+    """
+
+    def __init__(self, degrees: float = 15.0, height: int = 28, width: int = 28,
+                 channels: int = 1, fill: float = 0.0):
+        self.degrees = degrees
+        self.height = height
+        self.width = width
+        self.channels = channels
+        self.fill = fill
+
+    def __call__(self, data: List[float], num_features: int) -> List[float]:
+        angle = _random.uniform(-self.degrees, self.degrees)
+        rad = math.radians(angle)
+        cos_a = math.cos(rad)
+        sin_a = math.sin(rad)
+
+        h, w, c = self.height, self.width, self.channels
+        cx, cy = w / 2.0, h / 2.0
+        result = [self.fill] * (c * h * w)
+
+        for ch in range(c):
+            for row in range(h):
+                for col in range(w):
+                    # Map destination to source (inverse rotation)
+                    dx = col - cx
+                    dy = row - cy
+                    src_x = cos_a * dx + sin_a * dy + cx
+                    src_y = -sin_a * dx + cos_a * dy + cy
+
+                    # Bilinear interpolation
+                    x0 = int(math.floor(src_x))
+                    y0 = int(math.floor(src_y))
+                    x1 = x0 + 1
+                    y1 = y0 + 1
+                    fx = src_x - x0
+                    fy = src_y - y0
+
+                    def _pixel(r, cc):
+                        if 0 <= r < h and 0 <= cc < w:
+                            return data[ch * h * w + r * w + cc]
+                        return self.fill
+
+                    val = (
+                        _pixel(y0, x0) * (1 - fx) * (1 - fy) +
+                        _pixel(y0, x1) * fx * (1 - fy) +
+                        _pixel(y1, x0) * (1 - fx) * fy +
+                        _pixel(y1, x1) * fx * fy
+                    )
+                    result[ch * h * w + row * w + col] = val
+
+        return result
+
+    def __repr__(self) -> str:
+        return f"RandomRotation(degrees={self.degrees})"
+
+
+class RandomNoise:
+    """
+    Add random Gaussian noise to data.
+
+    Args:
+        std: Standard deviation of the noise.
+    """
+
+    def __init__(self, std: float = 0.01):
+        self.std = std
+
+    def __call__(self, data: List[float], num_features: int) -> List[float]:
+        return [v + _random.gauss(0, self.std) for v in data]
+
+    def __repr__(self) -> str:
+        return f"RandomNoise(std={self.std})"
+
+
+class RandomErasing:
+    """
+    Randomly erase a rectangular region of the image (Zhong et al., 2020).
+
+    Args:
+        p: Probability of erasing.
+        scale: Range of proportion of image area to erase.
+        ratio: Range of aspect ratio of erased region.
+        height: Image height.
+        width: Image width.
+        channels: Number of channels.
+        fill: Fill value for erased region.
+    """
+
+    def __init__(self, p: float = 0.5, scale: tuple = (0.02, 0.33),
+                 ratio: tuple = (0.3, 3.3), height: int = 28, width: int = 28,
+                 channels: int = 1, fill: float = 0.0):
+        self.p = p
+        self.scale = scale
+        self.ratio = ratio
+        self.height = height
+        self.width = width
+        self.channels = channels
+        self.fill = fill
+
+    def __call__(self, data: List[float], num_features: int) -> List[float]:
+        if _random.random() >= self.p:
+            return data
+
+        h, w = self.height, self.width
+        area = h * w
+        result = list(data)
+
+        for _ in range(10):  # try up to 10 times
+            target_area = _random.uniform(self.scale[0], self.scale[1]) * area
+            aspect = _random.uniform(self.ratio[0], self.ratio[1])
+            eh = int(round(math.sqrt(target_area * aspect)))
+            ew = int(round(math.sqrt(target_area / aspect)))
+            if eh < h and ew < w:
+                top = _random.randint(0, h - eh)
+                left = _random.randint(0, w - ew)
+                for c in range(self.channels):
+                    for r in range(top, top + eh):
+                        for col in range(left, left + ew):
+                            idx = c * h * w + r * w + col
+                            result[idx] = self.fill
+                return result
+
+        return result
+
+    def __repr__(self) -> str:
+        return f"RandomErasing(p={self.p})"
